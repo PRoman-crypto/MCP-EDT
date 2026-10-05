@@ -51,9 +51,6 @@ final class XdtoOps {
         }
         Package created = XdtoFactory.eINSTANCE.createPackage();
         created.setNsUri(metadata.getNamespace() == null ? "" : metadata.getNamespace()); //$NON-NLS-1$
-        if (created instanceof IBmObject bmPackage) {
-            transaction.attachTopObject(bmPackage, "XDTOPackage." + metadata.getName() + ".Package"); //$NON-NLS-1$ //$NON-NLS-2$
-        }
         metadata.setPackage(created);
         return created;
     }
@@ -76,8 +73,25 @@ final class XdtoOps {
         case "addXdtoProperty" -> addProperty(xdto, text(args, "xdtoType"), args); //$NON-NLS-1$ //$NON-NLS-2$
         case "removeXdtoType" -> removeType(xdto, text(args, "item")); //$NON-NLS-1$ //$NON-NLS-2$
         case "removeXdtoProperty" -> removeProperty(xdto, text(args, "xdtoType"), text(args, "property")); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        case "xdtoDiagnostics" -> diagnostics(metadata, xdto); //$NON-NLS-1$
         default -> throw new IllegalArgumentException("Невідома XDTO-операція: " + operation); //$NON-NLS-1$
         };
+    }
+
+    private static JsonObject diagnostics(XDTOPackage metadata, Package xdto) {
+        JsonObject info = new JsonObject();
+        info.addProperty("packageClass", xdto.getClass().getName()); //$NON-NLS-1$
+        info.addProperty("container", xdto.eContainer() == null ? null : xdto.eContainer().eClass().getName()); //$NON-NLS-1$
+        if (xdto instanceof IBmObject bm) {
+            info.addProperty("bmIsTop", bm.bmIsTop()); //$NON-NLS-1$
+            info.addProperty("bmFqn", bm.bmGetFqn()); //$NON-NLS-1$
+        }
+        if (metadata instanceof IBmObject bmMd) {
+            info.addProperty("mdFqn", bmMd.bmGetFqn()); //$NON-NLS-1$
+        }
+        info.addProperty("objects", xdto.getObjects().size()); //$NON-NLS-1$
+        info.addProperty("types", xdto.getTypes().size()); //$NON-NLS-1$
+        return info;
     }
 
     private static JsonObject setNamespace(XDTOPackage metadata, Package xdto, String namespace) {

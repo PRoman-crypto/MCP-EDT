@@ -245,7 +245,8 @@ public final class FormOps {
             Deque<FormItem> queue = new ArrayDeque<>(form.getItems());
             while (!queue.isEmpty()) {
                 FormItem item = queue.poll();
-                if (Emf.get(item, "dataPath") instanceof AbstractDataPath path && startsWith(path, pathTail)) { //$NON-NLS-1$
+                if (Emf.get(item, "dataPath") instanceof AbstractDataPath path //$NON-NLS-1$
+                        && startsWith(path, mainAttributeName(form), pathTail)) {
                     victims.add(item); // вкладені елементи (колонки таблиці) зникнуть разом із контейнером
                     continue;
                 }
@@ -272,9 +273,10 @@ public final class FormOps {
     }
 
     /** dataPath = [головний реквізит форми, tail...]: збіг по префіксу, без урахування регістру. */
-    private static boolean startsWith(AbstractDataPath path, List<String> tail) {
+    private static boolean startsWith(AbstractDataPath path, String mainAttribute, List<String> tail) {
         List<String> segments = path.getSegments();
-        if (segments.size() < tail.size() + 1) {
+        if (mainAttribute == null || segments.size() < tail.size() + 1
+                || !segments.get(0).equalsIgnoreCase(mainAttribute)) {
             return false;
         }
         for (int i = 0; i < tail.size(); i++) {

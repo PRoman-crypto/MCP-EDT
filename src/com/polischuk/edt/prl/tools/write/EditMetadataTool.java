@@ -61,7 +61,7 @@ public final class EditMetadataTool implements McpTool {
     public JsonObject inputSchema() {
         return JsonParser.parseString("""
                 {"type":"object","properties":{
-                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","addRecorder","removeRecorder","addAccountExtDimensionType","removeAccountExtDimensionType","setXdtoNamespace","addXdtoObjectType","addXdtoValueType","addXdtoProperty","removeXdtoType","removeXdtoProperty","batch"]},
+                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","addRecorder","removeRecorder","addAccountExtDimensionType","removeAccountExtDimensionType","setXdtoNamespace","addXdtoObjectType","addXdtoValueType","addXdtoProperty","removeXdtoType","removeXdtoProperty","xdtoDiagnostics","batch"]},
                   "project":{"type":"string","description":"Ім'я проєкту EDT (необов'язково, якщо проєкт один)"},
                   "kind":{"type":"string","description":"Вид метаданих (Catalog, Document, Справочник…)"},
                   "name":{"type":"string","description":"Ім'я об'єкта"},
@@ -555,7 +555,7 @@ public final class EditMetadataTool implements McpTool {
         case "addAccountExtDimensionType", "removeAccountExtDimensionType" -> StructureOps.accountExtDimension( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addAccountExtDimensionType".equals(operation)); //$NON-NLS-1$
         case "setXdtoNamespace", "addXdtoObjectType", "addXdtoValueType", "addXdtoProperty", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-                "removeXdtoType", "removeXdtoProperty" -> XdtoOps.apply(transaction, object, operation, arguments); //$NON-NLS-1$ //$NON-NLS-2$
+                "removeXdtoType", "removeXdtoProperty", "xdtoDiagnostics" -> XdtoOps.apply(transaction, object, operation, arguments); //$NON-NLS-1$ //$NON-NLS-2$
         case "addRecorder", "removeRecorder" -> StructureOps.recorders( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addRecorder".equals(operation)); //$NON-NLS-1$
         default -> throw new IllegalArgumentException("Операція недоступна (чи не підтримується в batch): " //$NON-NLS-1$

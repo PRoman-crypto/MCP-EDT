@@ -55,7 +55,9 @@ final class ExtensionTypeAdopt {
         IConfigurationProject parent = extension.getParent();
         EObject baseConfiguration = parent == null ? null : parent.getConfiguration();
         if (extensionConfiguration == null || baseConfiguration == null) {
-            return null;
+            JsonObject reason = new JsonObject();
+            reason.addProperty("skippedReason", "конфігурація розширення чи базова ще не завантажена в модель"); //$NON-NLS-1$ //$NON-NLS-2$
+            return reason;
         }
         JsonArray adopted = new JsonArray();
         JsonArray skipped = new JsonArray();
@@ -80,7 +82,10 @@ final class ExtensionTypeAdopt {
             adopted.add(kind + "." + name); //$NON-NLS-1$
         }
         if (adopted.size() == 0 && skipped.size() == 0) {
-            return null;
+            JsonObject checked = new JsonObject();
+            checked.addProperty("checked", referenced.size()); //$NON-NLS-1$
+            checked.addProperty("note", "усі ссылочные типи вже є в розширенні"); //$NON-NLS-1$ //$NON-NLS-2$
+            return checked;
         }
         JsonObject result = new JsonObject();
         result.add(dryRun ? "wouldAdopt" : "adopted", adopted); //$NON-NLS-1$ //$NON-NLS-2$
