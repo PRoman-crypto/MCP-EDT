@@ -86,7 +86,12 @@ public final class Types {
         }
         Object produced = Emf.get(owner, "producedTypes"); //$NON-NLS-1$
         Object refType = produced instanceof EObject types ? Emf.get(types, "refType") : null; //$NON-NLS-1$
-        return refType instanceof TypeItem item ? item : null;
+        if (refType instanceof TypeItem direct) {
+            return direct;
+        }
+        // MdRefType.type — це mcore.Type, який і є TypeItem згенерованого ссылочного типу
+        Object generated = refType instanceof EObject mdRefType ? Emf.get(mdRefType, "type") : null; //$NON-NLS-1$
+        return generated instanceof TypeItem item ? item : null;
     }
 
     static {
