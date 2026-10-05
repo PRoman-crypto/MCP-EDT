@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: MCP:PRL Server
 Bundle-SymbolicName: com.polischuk.edt.prl.server;singleton:=true
-Bundle-Version: 0.21.7
+Bundle-Version: 0.22.0
 Bundle-Vendor: Polischuk
 Bundle-Activator: com.polischuk.edt.prl.Activator
 Bundle-ActivationPolicy: lazy
@@ -30,6 +30,7 @@ Import-Package: com.sun.net.httpserver,
  com._1c.g5.v8.dt.platform.services.core.dump;resolution:=optional,
  com._1c.g5.v8.dt.platform.services.core.runtimes.execution;resolution:=optional,
  com._1c.g5.v8.dt.metadata.mdclass;resolution:=optional,
+ com._1c.g5.v8.dt.xdto.model;resolution:=optional,
  com._1c.g5.v8.dt.rights;resolution:=optional,
  com._1c.g5.v8.dt.rights.model;resolution:=optional,
  com._1c.g5.v8.dt.rights.model.util;resolution:=optional,

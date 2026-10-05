@@ -61,7 +61,7 @@ public final class EditMetadataTool implements McpTool {
     public JsonObject inputSchema() {
         return JsonParser.parseString("""
                 {"type":"object","properties":{
-                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","addRecorder","removeRecorder","batch"]},
+                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","addRecorder","removeRecorder","addAccountExtDimensionType","removeAccountExtDimensionType","setXdtoNamespace","addXdtoObjectType","addXdtoValueType","addXdtoProperty","removeXdtoType","removeXdtoProperty","batch"]},
                   "project":{"type":"string","description":"Ім'я проєкту EDT (необов'язково, якщо проєкт один)"},
                   "kind":{"type":"string","description":"Вид метаданих (Catalog, Document, Справочник…)"},
                   "name":{"type":"string","description":"Ім'я об'єкта"},
@@ -101,6 +101,18 @@ public final class EditMetadataTool implements McpTool {
                   "autoRecord":{"type":"string","description":"addExchangePlanContent: Allow | Deny (авторегістрація змін)"},
                   "rights":{"type":"array","items":{"type":"string"},"description":"setRoleRights: імена прав (Read/Чтение, Insert/Добавление, View/Просмотр…)"},
                   "recorders":{"type":"array","items":{"type":"string"},"description":"addRecorder/removeRecorder: документи-регістратори ['Документ.Заказ'] (аліас objects/document)"},
+                  "account":{"type":"string","description":"add/removeAccountExtDimensionType: ім'я предвизначеного рахунку (чи підрахунку)"},
+                  "extDimension":{"type":"string","description":"add/removeAccountExtDimensionType: ім'я виду субконто (предвизначений елемент ПВХ)"},
+                  "turnover":{"type":"boolean","description":"addAccountExtDimensionType: субконто оборотне"},
+                  "flags":{"type":"array","items":{"type":"string"},"description":"addAccountExtDimensionType: ознаки обліку субконто"},
+                  "cleanupForms":{"type":"boolean","default":true,"description":"deleteAttribute/deleteTabularSection: прибрати з форм об'єкта елементи з відповідним dataPath"},
+                  "namespace":{"type":"string","description":"setXdtoNamespace/createObject XDTOPackage: URI простору імен пакета"},
+                  "xdtoType":{"type":"string","description":"addXdtoProperty/removeXdtoProperty: ім'я об'єктного типу пакета"},
+                  "propertyType":{"type":"string","description":"addXdtoProperty: тип властивості (xs:string, xs:dateTime, v8:UUID, {uri}ім'я, або ім'я типу пакета)"},
+                  "xdtoProperties":{"type":"array","items":{"type":"object"},"description":"addXdtoObjectType: властивості одразу [{property|name, propertyType|type, lowerBound, upperBound, nillable, form}]"},
+                  "baseType":{"type":"string","description":"addXdtoValueType/addXdtoObjectType: базовий тип (за замовч. xs:string для значення)"},
+                  "enumerations":{"type":"array","items":{"type":"string"},"description":"addXdtoValueType: значення переліку"},
+                  "lowerBound":{"type":"integer"},"upperBound":{"type":"integer"},"nillable":{"type":"boolean"},
                   "fieldKind":{"type":"string","description":"addRegisterField/removeRegisterField: dimension | resource | attribute"},
                   "field":{"type":"string","description":"addRegisterField/removeRegisterField/setValueType: ім'я поля (аліас item)"},
                   "role":{"type":"string","description":"setRoleRight: ім'я ролі (аліас name)"},
@@ -167,8 +179,20 @@ public final class EditMetadataTool implements McpTool {
         IProject project = V8Access.resolveEclipseProject(projectName);
         IBmModel model = EdtServices.require(IBmModelManager.class).getModel(project);
 
+        JsonObject adoption = ExtensionTypeAdopt.prepare(project, arguments, dryRun);
+        if (adoption != null && dryRun && adoption.has("wouldAdopt") && adoption.getAsJsonArray("wouldAdopt").size() > 0) { //$NON-NLS-1$ //$NON-NLS-2$
+            JsonObject preview = new JsonObject();
+            preview.addProperty("operation", operation); //$NON-NLS-1$
+            preview.addProperty("dryRun", true); //$NON-NLS-1$
+            preview.addProperty("applied", false); //$NON-NLS-1$
+            preview.add("extensionTypes", adoption); //$NON-NLS-1$
+            preview.addProperty("note", //$NON-NLS-1$
+                    "Проєкт — розширення: ссылочные типи вимагають заимствования об'єктів (wouldAdopt). " //$NON-NLS-1$
+                    + "Без dryRun вони заимствуються автоматично; повний dryRun операції можливий після заимствования."); //$NON-NLS-1$
+            return preview;
+        }
         if ("batch".equals(operation)) { //$NON-NLS-1$
-            return executeBatch(project, model, arguments, dryRun);
+            return withAdoption(executeBatch(project, model, arguments, dryRun), adoption);
         }
 
         JsonObject normalized = normalizeAliases(operation, arguments);
@@ -207,7 +231,7 @@ public final class EditMetadataTool implements McpTool {
             result.addProperty("note", //$NON-NLS-1$
                     "Зміна застосована в модель EDT; серіалізація у файли відбувається автоматично."); //$NON-NLS-1$
         }
-        return result;
+        return withAdoption(result, adoption);
     }
 
     private static JsonObject setProperty(EObject object, String property, String value) {
@@ -351,11 +375,28 @@ public final class EditMetadataTool implements McpTool {
                     "example":{"operation":"addRecorder","kind":"РегистрНакопления","name":"МійРегистр","objects":["Документ.Заказ"],"dryRun":true}},
                   "removeRecorder":{"params":"kind=<вид регістра>, name, objects [, project, dryRun]",
                     "description":"Прибирає регістр зі списку 'Движения' документів."},
+                  "addAccountExtDimensionType":{"params":"kind=ChartOfAccounts, name, account, extDimension [, turnover, flags, project, dryRun]",
+                    "description":"Призначає предвизначеному рахунку (чи підрахунку) вид субконто з ПВХ, пов'язаного властивістю extDimensionTypes. Ліміт — maxExtDimensionCount. Ідемпотентно (повтор оновлює turnover/flags).",
+                    "example":{"operation":"addAccountExtDimensionType","kind":"ПланСчетов","name":"Хозрасчетный","account":"ДенежныеСредстваВКассе","extDimension":"Кассы","turnover":true,"dryRun":true}},
+                  "removeAccountExtDimensionType":{"params":"kind=ChartOfAccounts, name, account, extDimension [, project, dryRun]",
+                    "description":"Прибирає вид субконто з рахунку."},
+                  "setXdtoNamespace":{"params":"kind=XDTOPackage, name, namespace [, project, dryRun]",
+                    "description":"Простір імен XDTO-пакета (URI)."},
+                  "addXdtoObjectType":{"params":"kind=XDTOPackage, name, item [, xdtoProperties, open, abstract, baseType, project, dryRun]",
+                    "description":"Тип об'єкта пакета; властивості можна задати одразу масивом xdtoProperties.",
+                    "example":{"operation":"addXdtoObjectType","kind":"XDTOПакет","name":"МійПакет","item":"Замовлення","xdtoProperties":[{"property":"Номер","propertyType":"xs:string"},{"property":"Дата","propertyType":"xs:dateTime","form":"Attribute"}],"dryRun":true}},
+                  "addXdtoValueType":{"params":"kind=XDTOPackage, name, item [, baseType=xs:string, length, minLength, maxLength, enumerations, project, dryRun]",
+                    "description":"Тип значення на базі XSD (з обмеженнями довжини чи переліком значень)."},
+                  "addXdtoProperty":{"params":"kind=XDTOPackage, name, xdtoType, property [, propertyType=xs:string, lowerBound, upperBound, nillable, form=Element|Attribute|Text, project, dryRun]",
+                    "description":"Властивість об'єктного типу: тип xs:*, v8:UUID, {uri}ім'я або тип цього пакета; чужі простори імен додаються в imports."},
+                  "removeXdtoType":{"params":"kind=XDTOPackage, name, item [, project, dryRun]","description":"Видаляє тип пакета."},
+                  "removeXdtoProperty":{"params":"kind=XDTOPackage, name, xdtoType, property [, project, dryRun]","description":"Видаляє властивість об'єктного типу."},
                   "batch":{"params":"operations=[{operation, kind, name, ...}] [, project, dryRun]",
                     "description":"Список транзакційних операцій (setProperty/setSynonym/addAttribute/addTabularSection/create-deleteObject тощо) ОДНІЄЮ атомарною транзакцією: помилка кроку відкочує все. renameObject/adoptObject/форм-операції в batch не допускаються.",
                     "example":{"operation":"batch","dryRun":true,"operations":[{"operation":"createObject","kind":"Справочник","name":"МійДовідник"},{"operation":"addAttribute","kind":"Справочник","name":"МійДовідник","attribute":"Код1С","types":["Строка"],"length":10}]}}
                 },
-                "notes":["Сумісність із контрактом RSV: addRegisterField/removeRegisterField (fieldKind=dimension|resource|attribute, field), addEnumValue (value), setValueType (item, types — колекція шукається сама), setDefinedTypeTypes (types), setRoleRight (role, object, right, grant); повторне додавання поля повертає alreadyExists:true замість помилки; createObject приймає масиви dimensions/resources/attributes; setRoleRights приймає вкладені цілі Вид.Ім'я.Attribute.X / .TabularSection.X[.Attribute.Y] / .Command.X / .Dimension.X / .Resource.X; addExchangePlanContent приймає items:[{object,autoRecord}].",
+                "notes":["Розширення (CFE): ссылочные типи (СправочникСсылка.X…) автоматично заимствують потрібні об'єкти базової конфігурації (поле extensionTypes у відповіді; у dryRun — wouldAdopt). deleteAttribute/deleteTabularSection прибирають із форм об'єкта поля/таблиці з відповідним dataPath (cleanupForms:false — вимкнути).",
+                  "Сумісність із контрактом RSV: addRegisterField/removeRegisterField (fieldKind=dimension|resource|attribute, field), addEnumValue (value), setValueType (item, types — колекція шукається сама), setDefinedTypeTypes (types), setRoleRight (role, object, right, grant); повторне додавання поля повертає alreadyExists:true замість помилки; createObject приймає масиви dimensions/resources/attributes; setRoleRights приймає вкладені цілі Вид.Ім'я.Attribute.X / .TabularSection.X[.Attribute.Y] / .Command.X / .Dimension.X / .Resource.X; addExchangePlanContent приймає items:[{object,autoRecord}].",
                   "Нові операції (addDimension/addResource/addItem/deleteItem/setItemProperty/setItemType, склад підсистем і планів обміну, setRoleRights) — транзакційні: працюють у batch з createObject/addAttribute.",
                   "dryRun виконує транзакцію і відкочує її (executeAndRollback) — безпечна перевірка параметрів.",
                   "Створення top-об'єктів (довідників, документів) — у наступних версіях."]}""").getAsJsonObject(); //$NON-NLS-1$
@@ -448,6 +489,13 @@ public final class EditMetadataTool implements McpTool {
         if ("createObject".equals(operation)) { //$NON-NLS-1$
             JsonObject created = createTopObject(transaction, KindRegistry.canonical(kind), name, arguments);
             addInlineFields(transaction, project, KindRegistry.canonical(kind), name, arguments, created);
+            if ("XDTOPackage".equals(KindRegistry.canonical(kind)) //$NON-NLS-1$
+                    && transaction.getTopObjectByFqn("XDTOPackage." + name) instanceof com._1c.g5.v8.dt.metadata.mdclass.XDTOPackage newPackage) { //$NON-NLS-1$
+                if (arguments.has("namespace")) { //$NON-NLS-1$
+                    newPackage.setNamespace(arguments.get("namespace").getAsString()); //$NON-NLS-1$
+                }
+                XdtoOps.ensurePackage(transaction, newPackage);
+            }
             if ("Role".equals(KindRegistry.canonical(kind)) //$NON-NLS-1$
                     && transaction.getTopObjectByFqn("Role." + name) instanceof com._1c.g5.v8.dt.metadata.mdclass.Role newRole) { //$NON-NLS-1$
                 RoleRightsOps.ensureDescription(transaction, newRole);
@@ -470,12 +518,15 @@ public final class EditMetadataTool implements McpTool {
                 arguments.has("lang") ? arguments.get("lang").getAsString() : "ru"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         case "addAttribute" -> addChild(project, attributesOwner(object, arguments), //$NON-NLS-1$
                 "attributes", required(arguments, "attribute"), arguments, true); //$NON-NLS-1$ //$NON-NLS-2$
-        case "deleteAttribute" -> deleteChild(attributesOwner(object, arguments), //$NON-NLS-1$
-                "attributes", required(arguments, "attribute")); //$NON-NLS-1$ //$NON-NLS-2$
+        case "deleteAttribute" -> withFormCleanup(object, arguments, //$NON-NLS-1$
+                deleteChild(attributesOwner(object, arguments), "attributes", //$NON-NLS-1$
+                        required(arguments, "attribute")), //$NON-NLS-1$
+                tailOf(arguments, required(arguments, "attribute"))); //$NON-NLS-1$
         case "addTabularSection" -> addChild(project, object, "tabularSections", //$NON-NLS-1$ //$NON-NLS-2$
                 required(arguments, "tabularSection"), arguments, false); //$NON-NLS-1$
-        case "deleteTabularSection" -> deleteChild(object, "tabularSections", //$NON-NLS-1$ //$NON-NLS-2$
-                required(arguments, "tabularSection")); //$NON-NLS-1$
+        case "deleteTabularSection" -> withFormCleanup(object, arguments, //$NON-NLS-1$
+                deleteChild(object, "tabularSections", required(arguments, "tabularSection")), //$NON-NLS-1$ //$NON-NLS-2$
+                List.of(required(arguments, "tabularSection"))); //$NON-NLS-1$
         case "addDimension" -> addChild(project, attributesOwner(object, arguments), "dimensions", //$NON-NLS-1$ //$NON-NLS-2$
                 required(arguments, "item"), arguments, true); //$NON-NLS-1$
         case "addResource" -> addChild(project, attributesOwner(object, arguments), "resources", //$NON-NLS-1$ //$NON-NLS-2$
@@ -483,8 +534,13 @@ public final class EditMetadataTool implements McpTool {
         case "addItem" -> addChild(project, attributesOwner(object, arguments), //$NON-NLS-1$
                 required(arguments, "collection"), required(arguments, "item"), arguments, //$NON-NLS-1$ //$NON-NLS-2$
                 arguments.has("types")); //$NON-NLS-1$
-        case "deleteItem" -> deleteChild(attributesOwner(object, arguments), //$NON-NLS-1$
-                required(arguments, "collection"), required(arguments, "item")); //$NON-NLS-1$ //$NON-NLS-2$
+        case "deleteItem" -> {
+            JsonObject deleted = deleteChild(attributesOwner(object, arguments),
+                    required(arguments, "collection"), required(arguments, "item")); //$NON-NLS-1$ //$NON-NLS-2$
+            yield "attributes".equals(arguments.get("collection").getAsString()) //$NON-NLS-1$ //$NON-NLS-2$
+                    ? withFormCleanup(object, arguments, deleted, tailOf(arguments, arguments.get("item").getAsString())) //$NON-NLS-1$
+                    : deleted;
+        }
         case "setItemProperty" -> setProperty(findChild(attributesOwner(object, arguments), //$NON-NLS-1$
                 required(arguments, "collection"), required(arguments, "item")), //$NON-NLS-1$ //$NON-NLS-2$
                 required(arguments, "property"), textValue(arguments)); //$NON-NLS-1$
@@ -496,6 +552,10 @@ public final class EditMetadataTool implements McpTool {
         case "addExchangePlanContent", "removeExchangePlanContent" -> StructureOps.exchangePlanContent( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addExchangePlanContent".equals(operation)); //$NON-NLS-1$
         case "setRoleRights" -> RoleRightsOps.setRoleRights(transaction, object, arguments); //$NON-NLS-1$
+        case "addAccountExtDimensionType", "removeAccountExtDimensionType" -> StructureOps.accountExtDimension( //$NON-NLS-1$ //$NON-NLS-2$
+                transaction, object, arguments, "addAccountExtDimensionType".equals(operation)); //$NON-NLS-1$
+        case "setXdtoNamespace", "addXdtoObjectType", "addXdtoValueType", "addXdtoProperty", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+                "removeXdtoType", "removeXdtoProperty" -> XdtoOps.apply(transaction, object, operation, arguments); //$NON-NLS-1$ //$NON-NLS-2$
         case "addRecorder", "removeRecorder" -> StructureOps.recorders( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addRecorder".equals(operation)); //$NON-NLS-1$
         default -> throw new IllegalArgumentException("Операція недоступна (чи не підтримується в batch): " //$NON-NLS-1$
@@ -855,6 +915,35 @@ public final class EditMetadataTool implements McpTool {
         }
         if (appliedProperties.size() > 0) {
             change.add("properties", appliedProperties); //$NON-NLS-1$
+        }
+        return change;
+    }
+
+    private static JsonObject withAdoption(JsonObject result, JsonObject adoption) {
+        if (adoption != null) {
+            result.add("extensionTypes", adoption); //$NON-NLS-1$
+        }
+        return result;
+    }
+
+    private static List<String> tailOf(JsonObject arguments, String attribute) {
+        if (arguments.has("tabularSection") && !arguments.get("tabularSection").getAsString().isBlank()) { //$NON-NLS-1$ //$NON-NLS-2$
+            return List.of(arguments.get("tabularSection").getAsString(), attribute); //$NON-NLS-1$
+        }
+        return List.of(attribute);
+    }
+
+    /** Після видалення реквізита/ТЧ прибирає з форм об'єкта елементи, що на нього посилались (cleanupForms:false — вимкнути). */
+    private static JsonObject withFormCleanup(EObject owner, JsonObject arguments, JsonObject change,
+            List<String> pathTail) {
+        boolean cleanup = !arguments.has("cleanupForms") || arguments.get("cleanupForms").getAsBoolean(); //$NON-NLS-1$ //$NON-NLS-2$
+        if (cleanup) {
+            com.google.gson.JsonArray report = FormOps.cleanupAfterDelete(owner, pathTail);
+            if (report.size() > 0) {
+                change.add("formsCleaned", report); //$NON-NLS-1$
+            }
+            change.addProperty("warning", //$NON-NLS-1$
+                    "Посилання в коді/запитах НЕ чистяться; з форм об'єкта прибрано поля/таблиці з цим dataPath."); //$NON-NLS-1$
         }
         return change;
     }

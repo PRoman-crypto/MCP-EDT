@@ -224,6 +224,67 @@ public final class FormOps {
         });
     }
 
+    // ------------------------------------------------------------------ очищення форм
+
+    /**
+     * Прибирає з усіх форм об'єкта елементи, що посилаються на видалений реквізит чи ТЧ:
+     * поля/таблиці з dataPath, що починається з [головнийРеквізит, pathTail...]. Викликається
+     * з тієї ж BM-транзакції, що й видалення (форми — окремі top-об'єкти тієї ж моделі).
+     * pathTail: [реквізит] | [ТЧ] | [ТЧ, колонка].
+     */
+    static com.google.gson.JsonArray cleanupAfterDelete(EObject owner, List<String> pathTail) {
+        com.google.gson.JsonArray report = new com.google.gson.JsonArray();
+        if (!(Emf.get(owner, "forms") instanceof List<?> forms)) { //$NON-NLS-1$
+            return report;
+        }
+        for (Object formMd : forms) {
+            if (!(formMd instanceof EObject md) || !(Emf.get(md, "form") instanceof Form form)) { //$NON-NLS-1$
+                continue;
+            }
+            List<FormItem> victims = new ArrayList<>();
+            Deque<FormItem> queue = new ArrayDeque<>(form.getItems());
+            while (!queue.isEmpty()) {
+                FormItem item = queue.poll();
+                if (Emf.get(item, "dataPath") instanceof AbstractDataPath path && startsWith(path, pathTail)) { //$NON-NLS-1$
+                    victims.add(item); // вкладені елементи (колонки таблиці) зникнуть разом із контейнером
+                    continue;
+                }
+                if (item instanceof FormItemContainer container) {
+                    queue.addAll(container.getItems());
+                }
+            }
+            if (victims.isEmpty()) {
+                continue;
+            }
+            com.google.gson.JsonArray removed = new com.google.gson.JsonArray();
+            for (FormItem item : victims) {
+                if (item.eContainer() instanceof FormItemContainer container) {
+                    container.getItems().remove(item);
+                    removed.add(item.getName());
+                }
+            }
+            JsonObject entry = new JsonObject();
+            entry.addProperty("form", Emf.name(md)); //$NON-NLS-1$
+            entry.add("removedItems", removed); //$NON-NLS-1$
+            report.add(entry);
+        }
+        return report;
+    }
+
+    /** dataPath = [головний реквізит форми, tail...]: збіг по префіксу, без урахування регістру. */
+    private static boolean startsWith(AbstractDataPath path, List<String> tail) {
+        List<String> segments = path.getSegments();
+        if (segments.size() < tail.size() + 1) {
+            return false;
+        }
+        for (int i = 0; i < tail.size(); i++) {
+            if (!segments.get(i + 1).equalsIgnoreCase(tail.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ------------------------------------------------------------------ каркас транзакції
 
     @FunctionalInterface

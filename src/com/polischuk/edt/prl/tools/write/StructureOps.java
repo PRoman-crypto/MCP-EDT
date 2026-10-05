@@ -17,6 +17,7 @@ import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.polischuk.edt.prl.edt.Emf;
 import com.polischuk.edt.prl.edt.KindRegistry;
@@ -289,5 +290,133 @@ final class StructureOps {
             change.add("skipped", skipped); //$NON-NLS-1$
         }
         return change;
+    }
+
+    /**
+     * Субконто рахунку плану рахунків: addAccountExtDimensionType / removeAccountExtDimensionType.
+     * Параметри: name = план рахунків, account = ім'я предвизначеного рахунку (чи підрахунку),
+     * extDimension = ім'я виду субконто (предвизначений елемент ПВХ, пов'язаного властивістю
+     * extDimensionTypes), [turnover, flags = імена ознак обліку субконто]. Ідемпотентно.
+     */
+    @SuppressWarnings("unchecked")
+    static JsonObject accountExtDimension(IBmTransaction transaction, EObject chart, JsonObject arguments,
+            boolean add) {
+        if (!"ChartOfAccounts".equals(chart.eClass().getName())) { //$NON-NLS-1$
+            throw new IllegalArgumentException("Операція призначена для kind=ChartOfAccounts, а не " //$NON-NLS-1$
+                    + chart.eClass().getName());
+        }
+        String accountName = text(arguments, "account"); //$NON-NLS-1$
+        String dimensionName = text(arguments, "extDimension"); //$NON-NLS-1$
+        Object planRef = Emf.get(chart, "extDimensionTypes"); //$NON-NLS-1$
+        if (!(planRef instanceof EObject plan)) {
+            throw new IllegalStateException("У плану рахунків " + Emf.name(chart) //$NON-NLS-1$
+                    + " не задано план видів характеристик для субконто. Спершу: setProperty property=extDimensionTypes"); //$NON-NLS-1$
+        }
+        EObject planTop = transaction.getTopObjectByFqn("ChartOfCharacteristicTypes." + Emf.name(plan)); //$NON-NLS-1$
+        EObject characteristic = findPredefined(planTop == null ? plan : planTop, dimensionName);
+        if (characteristic == null) {
+            throw new IllegalArgumentException("Вид субконто '" + dimensionName + "' не знайдено серед предвизначених ПВХ " //$NON-NLS-1$ //$NON-NLS-2$
+                    + Emf.name(plan)); //$NON-NLS-1$
+        }
+        EObject account = findPredefined(chart, accountName);
+        if (account == null) {
+            throw new IllegalArgumentException("Предвизначений рахунок '" + accountName + "' не знайдено у плані рахунків " //$NON-NLS-1$ //$NON-NLS-2$
+                    + Emf.name(chart)); //$NON-NLS-1$
+        }
+        List<EObject> dimensions = (List<EObject>) Emf.get(account, "extDimensionTypes"); //$NON-NLS-1$
+        EObject existing = null;
+        for (EObject item : dimensions) {
+            if (Emf.get(item, "characteristicType") instanceof EObject type && same(type, characteristic)) { //$NON-NLS-1$
+                existing = item;
+                break;
+            }
+        }
+        JsonObject change = new JsonObject();
+        change.addProperty("account", accountName); //$NON-NLS-1$
+        change.addProperty("extDimension", dimensionName); //$NON-NLS-1$
+        if (!add) {
+            if (existing == null) {
+                change.addProperty("alreadyAbsent", true); //$NON-NLS-1$
+            } else {
+                dimensions.remove(existing);
+                change.addProperty("removed", true); //$NON-NLS-1$
+            }
+            return change;
+        }
+        boolean turnover = arguments.has("turnover") && arguments.get("turnover").getAsBoolean(); //$NON-NLS-1$ //$NON-NLS-2$
+        if (existing == null) {
+            Object max = Emf.get(chart, "maxExtDimensionCount"); //$NON-NLS-1$
+            if (max instanceof Integer limit && limit.intValue() > 0 && dimensions.size() >= limit.intValue()) {
+                throw new IllegalArgumentException("Ліміт субконто на рахунок вичерпано: maxExtDimensionCount=" + limit //$NON-NLS-1$
+                        + ". Збільште його: setProperty property=maxExtDimensionCount."); //$NON-NLS-1$
+            }
+            EReference reference = (EReference) account.eClass().getEStructuralFeature("extDimensionTypes"); //$NON-NLS-1$
+            existing = EcoreUtil.create(reference.getEReferenceType());
+            existing.eSet(existing.eClass().getEStructuralFeature("characteristicType"), characteristic); //$NON-NLS-1$
+            dimensions.add(existing);
+            change.addProperty("added", true); //$NON-NLS-1$
+        } else {
+            change.addProperty("alreadyExists", true); //$NON-NLS-1$
+        }
+        EStructuralFeature turnoverFeature = existing.eClass().getEStructuralFeature("turnover"); //$NON-NLS-1$
+        if (turnoverFeature != null && arguments.has("turnover")) { //$NON-NLS-1$
+            existing.eSet(turnoverFeature, Boolean.valueOf(turnover));
+            change.addProperty("turnover", turnover); //$NON-NLS-1$
+        }
+        if (arguments.has("flags") && arguments.get("flags").isJsonArray()) { //$NON-NLS-1$ //$NON-NLS-2$
+            List<EObject> chartFlags = (List<EObject>) Emf.get(chart, "extDimensionAccountingFlags"); //$NON-NLS-1$
+            List<EObject> itemFlags = (List<EObject>) Emf.get(existing, "extDimensionAccountingFlags"); //$NON-NLS-1$
+            JsonArray applied = new JsonArray();
+            for (JsonElement flagName : arguments.getAsJsonArray("flags")) { //$NON-NLS-1$
+                EObject flag = null;
+                for (EObject candidate : chartFlags) {
+                    if (flagName.getAsString().equalsIgnoreCase(Emf.name(candidate))) {
+                        flag = candidate;
+                        break;
+                    }
+                }
+                if (flag == null) {
+                    throw new IllegalArgumentException("Ознаку обліку субконто не знайдено: " + flagName.getAsString()); //$NON-NLS-1$
+                }
+                if (!itemFlags.contains(flag)) {
+                    itemFlags.add(flag);
+                }
+                applied.add(Emf.name(flag));
+            }
+            change.add("flags", applied); //$NON-NLS-1$
+        }
+        return change;
+    }
+
+    /** Предвизначений елемент за іменем (рекурсивно по childItems) у ПВХ/плані рахунків. */
+    @SuppressWarnings("unchecked")
+    private static EObject findPredefined(EObject owner, String name) {
+        Object predefined = Emf.get(owner, "predefined"); //$NON-NLS-1$
+        if (!(predefined instanceof EObject container) || !(Emf.get(container, "items") instanceof List<?> items)) { //$NON-NLS-1$
+            return null;
+        }
+        java.util.ArrayDeque<EObject> queue = new java.util.ArrayDeque<>();
+        for (Object item : items) {
+            queue.add((EObject) item);
+        }
+        while (!queue.isEmpty()) {
+            EObject item = queue.poll();
+            if (name.equalsIgnoreCase(Emf.name(item))) {
+                return item;
+            }
+            if (Emf.get(item, "childItems") instanceof List<?> children) { //$NON-NLS-1$
+                for (Object child : children) {
+                    queue.add((EObject) child);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String text(JsonObject arguments, String name) {
+        if (!arguments.has(name) || arguments.get(name).isJsonNull() || arguments.get(name).getAsString().isBlank()) {
+            throw new IllegalArgumentException("Обов'язковий параметр відсутній: " + name); //$NON-NLS-1$
+        }
+        return arguments.get(name).getAsString();
     }
 }

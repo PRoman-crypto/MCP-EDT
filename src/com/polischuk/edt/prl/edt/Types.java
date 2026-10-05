@@ -59,6 +59,17 @@ public final class Types {
     private Types() {
     }
 
+    /** "СправочникСсылка.X" → {"Catalog","X"}; не ссылочный тип з іменем → null. */
+    public static String[] refKindAndName(String raw) {
+        String platform = toPlatformTypeName(raw);
+        int dot = platform.indexOf('.');
+        if (dot <= 0) {
+            return null;
+        }
+        String kind = REF_KIND.get(platform.substring(0, dot));
+        return kind == null ? null : new String[] {kind, platform.substring(dot + 1)};
+    }
+
     /** Задає транзакцію для резолву ссылочных типів (скидається викликом з null). */
     public static void setTransaction(IBmTransaction transaction) {
         if (transaction == null) {
