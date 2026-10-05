@@ -83,6 +83,7 @@ final class ExtensionTypeAdopt {
                 adoptArguments.addProperty("kind", kind); //$NON-NLS-1$
                 adoptArguments.addProperty("name", name); //$NON-NLS-1$
                 ExtensionOps.adoptObject(adoptArguments);
+                awaitProducedTypes(project, kind, name);
             }
             adopted.add(kind + "." + name); //$NON-NLS-1$
         }
@@ -99,6 +100,36 @@ final class ExtensionTypeAdopt {
             result.add("notInBase", skipped); //$NON-NLS-1$
         }
         return result;
+    }
+
+    /** Після adopt згенеровані типи обчислюються асинхронно — чекаємо (до ~40 с), поки refType стане доступним. */
+    private static void awaitProducedTypes(IProject project, String kind, String name) {
+        com._1c.g5.v8.bm.integration.IBmModel model = com.polischuk.edt.prl.edt.EdtServices
+                .require(com._1c.g5.v8.dt.core.platform.IBmModelManager.class).getModel(project);
+        try {
+            model.waitAllEnqueuedEventsSent();
+        } catch (RuntimeException ignored) {
+            // продовжуємо з опитуванням
+        }
+        for (int attempt = 0; attempt < 40; attempt++) {
+            Boolean ready = model.executeReadonlyTask(new com._1c.g5.v8.bm.integration.AbstractBmTask<Boolean>(
+                    "MCP:PRL await produced types") { //$NON-NLS-1$
+                @Override
+                public Boolean execute(com._1c.g5.v8.bm.core.IBmTransaction transaction,
+                        org.eclipse.core.runtime.IProgressMonitor monitor) {
+                    return Boolean.valueOf(Types.producedRefTypeReady(transaction, kind, name));
+                }
+            });
+            if (Boolean.TRUE.equals(ready)) {
+                return;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private static int sizeOf(EObject configuration, String kind) {

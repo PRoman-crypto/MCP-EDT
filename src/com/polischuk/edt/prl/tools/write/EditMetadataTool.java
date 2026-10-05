@@ -813,6 +813,12 @@ public final class EditMetadataTool implements McpTool {
                 ((List<EObject>) configuration.eGet(reference)).remove(bmObject);
             }
         }
+        // окремі top-об'єкти, що належать об'єкту (Package.xdto) — інакше лишаються в BM сиротами
+        if (bmObject instanceof com._1c.g5.v8.dt.metadata.mdclass.XDTOPackage xdtoPackage
+                && xdtoPackage.getPackage() instanceof IBmObject bmPackage && bmPackage.bmIsTop()) {
+            xdtoPackage.setPackage(null);
+            transaction.detachTopObject(bmPackage);
+        }
         transaction.detachTopObject(bmObject);
         JsonObject change = new JsonObject();
         change.addProperty("deleted", fqn); //$NON-NLS-1$

@@ -52,7 +52,12 @@ final class XdtoOps {
         Package created = XdtoFactory.eINSTANCE.createPackage();
         created.setNsUri(metadata.getNamespace() == null ? "" : metadata.getNamespace()); //$NON-NLS-1$
         if (created instanceof IBmObject bmPackage) {
-            transaction.attachTopObject(bmPackage, "XDTOPackage." + metadata.getName() + ".Package"); //$NON-NLS-1$ //$NON-NLS-2$
+            String packageFqn = "XDTOPackage." + metadata.getName() + ".Package"; //$NON-NLS-1$ //$NON-NLS-2$
+            IBmObject orphan = transaction.getTopObjectByFqn(packageFqn);
+            if (orphan != null) {
+                transaction.detachTopObject(orphan); // осиротілий Package від раніше видаленого пакета
+            }
+            transaction.attachTopObject(bmPackage, packageFqn);
         }
         metadata.setPackage(created);
         return created;
@@ -168,7 +173,7 @@ final class XdtoOps {
         if (args.has("enumerations") && args.get("enumerations").isJsonArray()) { //$NON-NLS-1$ //$NON-NLS-2$
             for (JsonElement value : args.getAsJsonArray("enumerations")) { //$NON-NLS-1$
                 Enumeration enumeration = XdtoFactory.eINSTANCE.createEnumeration();
-                enumeration.setType(type.getBaseType());
+                enumeration.setType(org.eclipse.emf.ecore.util.EcoreUtil.copy(type.getBaseType()));
                 enumeration.setContent(value.getAsString());
                 type.getEnumerations().add(enumeration);
             }

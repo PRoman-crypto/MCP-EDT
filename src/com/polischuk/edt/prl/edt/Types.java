@@ -79,6 +79,20 @@ public final class Types {
         }
     }
 
+    /** Чи вже доступний згенерований ссылочный тип об'єкта kind.name (після заимствования обчислюється асинхронно). */
+    public static boolean producedRefTypeReady(IBmTransaction transaction, String kind, String name) {
+        EObject owner = transaction.getTopObjectByFqn(kind + "." + name); //$NON-NLS-1$
+        if (owner == null) {
+            return false;
+        }
+        Object produced = Emf.get(owner, "producedTypes"); //$NON-NLS-1$
+        Object refType = produced instanceof EObject types ? Emf.get(types, "refType") : null; //$NON-NLS-1$
+        if (refType instanceof TypeItem) {
+            return true;
+        }
+        return refType instanceof EObject mdRefType && Emf.get(mdRefType, "type") instanceof TypeItem; //$NON-NLS-1$
+    }
+
     /** "CatalogRef.X" → TypeItem зі згенерованих типів (producedTypes.refType) метаданих X. */
     private static TypeItem producedRefType(String platformName) {
         IBmTransaction transaction = CURRENT_TRANSACTION.get();
