@@ -20,15 +20,27 @@ public final class MetadataIndex {
     private MetadataIndex() {
     }
 
-    /** Колекція конфігурації за канонічним видом (за EClass елементів або ім'ям колекції). */
+    /**
+     * Колекція конфігурації за канонічним видом (за EClass елементів або ім'ям колекції).
+     * Спершу колекції-власники (containment); посилання (напр. roles) — лише другим проходом
+     * і без допоміжних списків на кшталт defaultRoles / standaloneConfigurationRestrictionRoles.
+     */
     public static EReference findCollectionRef(EObject configuration, String canonicalKind) {
+        EReference found = findCollectionRef(configuration, canonicalKind, true);
+        return found != null ? found : findCollectionRef(configuration, canonicalKind, false);
+    }
+
+    private static EReference findCollectionRef(EObject configuration, String canonicalKind, boolean containment) {
         String wanted = canonicalKind.toLowerCase(Locale.ROOT);
         for (EReference reference : configuration.eClass().getEAllReferences()) {
-            // лише колекції-власники: звичайні посилання (напр. defaultRoles, subsystems-посилання) не підходять
-            if (!reference.isMany() || !reference.isContainment()) {
+            if (!reference.isMany() || reference.isContainment() != containment) {
                 continue;
             }
-            if (reference.getName().toLowerCase(Locale.ROOT).equals(wanted)
+            String referenceName = reference.getName().toLowerCase(Locale.ROOT);
+            if (!containment && (referenceName.startsWith("default") || referenceName.startsWith("standalone"))) { //$NON-NLS-1$ //$NON-NLS-2$
+                continue;
+            }
+            if (referenceName.equals(wanted)
                     || reference.getEReferenceType().getName().toLowerCase(Locale.ROOT).equals(wanted)) {
                 return reference;
             }
