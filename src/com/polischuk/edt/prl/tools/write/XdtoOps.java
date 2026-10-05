@@ -51,6 +51,9 @@ final class XdtoOps {
         }
         Package created = XdtoFactory.eINSTANCE.createPackage();
         created.setNsUri(metadata.getNamespace() == null ? "" : metadata.getNamespace()); //$NON-NLS-1$
+        if (created instanceof IBmObject bmPackage) {
+            transaction.attachTopObject(bmPackage, "XDTOPackage." + metadata.getName() + ".Package"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
         metadata.setPackage(created);
         return created;
     }

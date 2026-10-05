@@ -61,11 +61,16 @@ final class ExtensionTypeAdopt {
         }
         JsonArray adopted = new JsonArray();
         JsonArray skipped = new JsonArray();
+        JsonArray details = new JsonArray();
         for (String reference : referenced) {
             String[] parts = reference.split("\\|", 2); //$NON-NLS-1$
             String kind = parts[0];
             String name = parts[1];
-            if (exists(extensionConfiguration, kind, name)) {
+            boolean inExtension = exists(extensionConfiguration, kind, name);
+            details.add(kind + "." + name + " inExtension=" + inExtension + " inBase=" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                    + exists(baseConfiguration, kind, name) + " extCfg=" + extensionConfiguration.eClass().getName() //$NON-NLS-1$
+                    + " collSize=" + sizeOf(extensionConfiguration, kind)); //$NON-NLS-1$
+            if (inExtension) {
                 continue;
             }
             if (!exists(baseConfiguration, kind, name)) {
@@ -85,6 +90,7 @@ final class ExtensionTypeAdopt {
             JsonObject checked = new JsonObject();
             checked.addProperty("checked", referenced.size()); //$NON-NLS-1$
             checked.addProperty("note", "усі ссылочные типи вже є в розширенні"); //$NON-NLS-1$ //$NON-NLS-2$
+            checked.add("details", details); //$NON-NLS-1$
             return checked;
         }
         JsonObject result = new JsonObject();
@@ -93,6 +99,11 @@ final class ExtensionTypeAdopt {
             result.add("notInBase", skipped); //$NON-NLS-1$
         }
         return result;
+    }
+
+    private static int sizeOf(EObject configuration, String kind) {
+        List<?> collection = MetadataIndex.findCollection(configuration, kind);
+        return collection == null ? -1 : collection.size();
     }
 
     private static boolean exists(EObject configuration, String kind, String name) {
