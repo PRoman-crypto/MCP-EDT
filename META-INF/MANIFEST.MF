@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: MCP:PRL Server
 Bundle-SymbolicName: com.polischuk.edt.prl.server;singleton:=true
-Bundle-Version: 0.21.5
+Bundle-Version: 0.21.6
 Bundle-Vendor: Polischuk
 Bundle-Activator: com.polischuk.edt.prl.Activator
 Bundle-ActivationPolicy: lazy

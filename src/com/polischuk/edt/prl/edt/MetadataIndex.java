@@ -24,7 +24,8 @@ public final class MetadataIndex {
     public static EReference findCollectionRef(EObject configuration, String canonicalKind) {
         String wanted = canonicalKind.toLowerCase(Locale.ROOT);
         for (EReference reference : configuration.eClass().getEAllReferences()) {
-            if (!reference.isMany()) {
+            // лише колекції-власники: звичайні посилання (напр. defaultRoles, subsystems-посилання) не підходять
+            if (!reference.isMany() || !reference.isContainment()) {
                 continue;
             }
             if (reference.getName().toLowerCase(Locale.ROOT).equals(wanted)
