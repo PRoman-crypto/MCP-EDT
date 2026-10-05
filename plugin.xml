@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <!-- MCP:PRL Server — ранній старт: піднімає MCP HTTP-сервер після старту workbench -->
+   <extension point="org.eclipse.ui.startup">
+      <startup class="com.polischuk.edt.prl.McpStartup"/>
+   </extension>
+
+   <!-- Сторінка налаштувань: Window → Preferences → MCP:PRL -->
+   <extension point="org.eclipse.ui.preferencePages">
+      <page
+            id="com.polischuk.edt.prl.preferences"
+            name="MCP:PRL"
+            class="com.polischuk.edt.prl.ui.PrlPreferencePage">
+      </page>
+   </extension>
+
+   <!-- Індикатор стану сервера — нижній правий трим. Малюється одним нативним Label
+        з композитним зображенням (кружечок+текст): трим поважає природний розмір Label
+        так само, як сусідні нативні контроли, і не схлопує рядок. -->
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution locationURI="toolbar:org.eclipse.ui.trim.status">
+         <toolbar id="com.polischuk.edt.prl.statusBar">
+            <control
+                  class="com.polischuk.edt.prl.ui.McpStatusContribution"
+                  id="com.polischuk.edt.prl.mcpStatus">
+            </control>
+         </toolbar>
+      </menuContribution>
+   </extension>
+</plugin>

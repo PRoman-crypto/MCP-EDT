@@ -1,0 +1,10 @@
+bin/
+dist/
+site/
+distr/
+backup/
+*.zip
+.claude/settings.local.json
+docs/reference/
+build.ps1
+add-headers.ps1
