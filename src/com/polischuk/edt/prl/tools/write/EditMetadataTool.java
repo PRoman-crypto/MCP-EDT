@@ -61,7 +61,7 @@ public final class EditMetadataTool implements McpTool {
     public JsonObject inputSchema() {
         return JsonParser.parseString("""
                 {"type":"object","properties":{
-                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","batch"]},
+                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","addRecorder","removeRecorder","batch"]},
                   "project":{"type":"string","description":"Ім'я проєкту EDT (необов'язково, якщо проєкт один)"},
                   "kind":{"type":"string","description":"Вид метаданих (Catalog, Document, Справочник…)"},
                   "name":{"type":"string","description":"Ім'я об'єкта"},
@@ -100,6 +100,7 @@ public final class EditMetadataTool implements McpTool {
                   "objects":{"type":"array","items":{"type":"string"},"description":"Склад підсистеми/плану обміну/цілі прав: ['Справочник.Номенклатура','Document.Заказ']"},
                   "autoRecord":{"type":"string","description":"addExchangePlanContent: Allow | Deny (авторегістрація змін)"},
                   "rights":{"type":"array","items":{"type":"string"},"description":"setRoleRights: імена прав (Read/Чтение, Insert/Добавление, View/Просмотр…)"},
+                  "recorders":{"type":"array","items":{"type":"string"},"description":"addRecorder/removeRecorder: документи-регістратори ['Документ.Заказ'] (аліас objects/document)"},
                   "fieldKind":{"type":"string","description":"addRegisterField/removeRegisterField: dimension | resource | attribute"},
                   "field":{"type":"string","description":"addRegisterField/removeRegisterField/setValueType: ім'я поля (аліас item)"},
                   "role":{"type":"string","description":"setRoleRight: ім'я ролі (аліас name)"},
@@ -345,6 +346,11 @@ public final class EditMetadataTool implements McpTool {
                   "setRoleRights":{"params":"kind=Role, name, objects, rights [, grant=true, setForNewObjects, setForAttributesByDefault, project, dryRun]",
                     "description":"Права ролі на об'єкти: надає (grant:true) або забирає (grant:false) права rights для кожного з objects. Імена прав — англ. або рос. (Read/Чтение, Insert/Добавление, Update/Изменение, Delete/Удаление, View/Просмотр, InteractiveInsert…); недоступне право — помилка з переліком доступних для цього об'єкта. Без objects можна лише змінити прапорці ролі. RLS цією операцією не змінюються. Перевірка — get_role_rights.",
                     "example":{"operation":"setRoleRights","kind":"Роль","name":"МояРоль","objects":["Справочник.Номенклатура"],"rights":["Read","View"],"dryRun":true}},
+                  "addRecorder":{"params":"kind=<вид регістра>, name, objects|recorders|document [, project, dryRun]",
+                    "description":"Документи-регістратори регістра: додає регістр до списку 'Движения' кожного документа. Ідемпотентно.",
+                    "example":{"operation":"addRecorder","kind":"РегистрНакопления","name":"МійРегистр","objects":["Документ.Заказ"],"dryRun":true}},
+                  "removeRecorder":{"params":"kind=<вид регістра>, name, objects [, project, dryRun]",
+                    "description":"Прибирає регістр зі списку 'Движения' документів."},
                   "batch":{"params":"operations=[{operation, kind, name, ...}] [, project, dryRun]",
                     "description":"Список транзакційних операцій (setProperty/setSynonym/addAttribute/addTabularSection/create-deleteObject тощо) ОДНІЄЮ атомарною транзакцією: помилка кроку відкочує все. renameObject/adoptObject/форм-операції в batch не допускаються.",
                     "example":{"operation":"batch","dryRun":true,"operations":[{"operation":"createObject","kind":"Справочник","name":"МійДовідник"},{"operation":"addAttribute","kind":"Справочник","name":"МійДовідник","attribute":"Код1С","types":["Строка"],"length":10}]}}
@@ -486,6 +492,8 @@ public final class EditMetadataTool implements McpTool {
         case "addExchangePlanContent", "removeExchangePlanContent" -> StructureOps.exchangePlanContent( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addExchangePlanContent".equals(operation)); //$NON-NLS-1$
         case "setRoleRights" -> RoleRightsOps.setRoleRights(transaction, object, arguments); //$NON-NLS-1$
+        case "addRecorder", "removeRecorder" -> StructureOps.recorders( //$NON-NLS-1$ //$NON-NLS-2$
+                transaction, object, arguments, "addRecorder".equals(operation)); //$NON-NLS-1$
         default -> throw new IllegalArgumentException("Операція недоступна (чи не підтримується в batch): " //$NON-NLS-1$
                 + operation + ". Викличте operation=help."); //$NON-NLS-1$
         };
@@ -545,6 +553,10 @@ public final class EditMetadataTool implements McpTool {
             copyIfAbsent(args, "rights", "right"); //$NON-NLS-1$ //$NON-NLS-2$
         }
         case "addExchangePlanContent", "removeExchangePlanContent" -> copyIfAbsent(args, "objects", "content"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        case "addRecorder", "removeRecorder" -> { //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "objects", "recorders"); //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "objects", "document"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
         case "addSubsystemContent", "removeSubsystemContent" -> copyIfAbsent(args, "objects", "content"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         case "setDefinedTypeTypes" -> { //$NON-NLS-1$
             copyIfAbsent(args, "types", "typeNames"); //$NON-NLS-1$ //$NON-NLS-2$

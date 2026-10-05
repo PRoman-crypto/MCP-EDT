@@ -252,4 +252,42 @@ final class StructureOps {
         }
         item.eSet(attribute, EditMetadataTool.convertScalar(attribute, value));
     }
+
+    /** Документи-регістратори: регістр додається до/прибирається зі списку registerRecords документа. */
+    @SuppressWarnings("unchecked")
+    static JsonObject recorders(IBmTransaction transaction, EObject register, JsonObject arguments, boolean add) {
+        JsonArray changed = new JsonArray();
+        JsonArray skipped = new JsonArray();
+        for (String reference : stringList(arguments, "objects", "object")) { //$NON-NLS-1$ //$NON-NLS-2$
+            String full = reference.indexOf('.') > 0 ? reference : "Document." + reference; //$NON-NLS-1$
+            EObject document = resolveReference(transaction, full);
+            if (!(Emf.get(document, "registerRecords") instanceof List<?> raw)) { //$NON-NLS-1$
+                throw new IllegalArgumentException(full + " не має списку Движения (registerRecords)"); //$NON-NLS-1$
+            }
+            List<EObject> records = (List<EObject>) raw;
+            EObject existing = null;
+            for (EObject record : records) {
+                if (same(record, register)) {
+                    existing = record;
+                    break;
+                }
+            }
+            if (add && existing == null) {
+                records.add(register);
+                changed.add(full);
+            } else if (!add && existing != null) {
+                records.remove(existing);
+                changed.add(full);
+            } else {
+                skipped.add(full);
+            }
+        }
+        JsonObject change = new JsonObject();
+        change.addProperty("register", register.eClass().getName() + "." + Emf.name(register)); //$NON-NLS-1$ //$NON-NLS-2$
+        change.add(add ? "added" : "removed", changed); //$NON-NLS-1$ //$NON-NLS-2$
+        if (skipped.size() > 0) {
+            change.add("skipped", skipped); //$NON-NLS-1$
+        }
+        return change;
+    }
 }
