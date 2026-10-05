@@ -61,7 +61,7 @@ public final class EditMetadataTool implements McpTool {
     public JsonObject inputSchema() {
         return JsonParser.parseString("""
                 {"type":"object","properties":{
-                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","batch"]},
+                  "operation":{"type":"string","enum":["help","setProperty","unsetProperty","setSynonym","addAttribute","deleteAttribute","addTabularSection","deleteTabularSection","createObject","deleteObject","adoptObject","listAdopted","renameObject","addFormField","addFormCommand","addFormGroup","deleteFormItem","addFormHandler","createTemplate","setTemplateContent","setDataSetQuery","addItem","deleteItem","setItemProperty","setItemType","addDimension","addResource","addSubsystemContent","removeSubsystemContent","addExchangePlanContent","removeExchangePlanContent","setRoleRights","addRegisterField","removeRegisterField","addEnumValue","setValueType","setRoleRight","setDefinedTypeTypes","batch"]},
                   "project":{"type":"string","description":"Ім'я проєкту EDT (необов'язково, якщо проєкт один)"},
                   "kind":{"type":"string","description":"Вид метаданих (Catalog, Document, Справочник…)"},
                   "name":{"type":"string","description":"Ім'я об'єкта"},
@@ -100,6 +100,9 @@ public final class EditMetadataTool implements McpTool {
                   "objects":{"type":"array","items":{"type":"string"},"description":"Склад підсистеми/плану обміну/цілі прав: ['Справочник.Номенклатура','Document.Заказ']"},
                   "autoRecord":{"type":"string","description":"addExchangePlanContent: Allow | Deny (авторегістрація змін)"},
                   "rights":{"type":"array","items":{"type":"string"},"description":"setRoleRights: імена прав (Read/Чтение, Insert/Добавление, View/Просмотр…)"},
+                  "fieldKind":{"type":"string","description":"addRegisterField/removeRegisterField: dimension | resource | attribute"},
+                  "field":{"type":"string","description":"addRegisterField/removeRegisterField/setValueType: ім'я поля (аліас item)"},
+                  "role":{"type":"string","description":"setRoleRight: ім'я ролі (аліас name)"},
                   "grant":{"type":"boolean","default":true,"description":"setRoleRights: true — надати права, false — забрати"},
                   "setForNewObjects":{"type":"boolean","description":"setRoleRights: прапорець ролі «Права для нових об'єктів»"},
                   "setForAttributesByDefault":{"type":"boolean","description":"setRoleRights: прапорець ролі «Права для реквізитів за замовчуванням»"},
@@ -167,14 +170,20 @@ public final class EditMetadataTool implements McpTool {
             return executeBatch(project, model, arguments, dryRun);
         }
 
-        String kind = required(arguments, "kind"); //$NON-NLS-1$
-        String name = required(arguments, "name"); //$NON-NLS-1$
+        JsonObject normalized = normalizeAliases(operation, arguments);
+        String kind = required(normalized, "kind"); //$NON-NLS-1$
+        String name = required(normalized, "name"); //$NON-NLS-1$
         String fqn = KindRegistry.canonical(kind) + "." + name; //$NON-NLS-1$
 
         AbstractBmTask<JsonObject> task = new AbstractBmTask<>("MCP:PRL edit_metadata " + operation) { //$NON-NLS-1$
             @Override
             public JsonObject execute(IBmTransaction transaction, IProgressMonitor monitor) {
-                return applyTransactionalOperation(transaction, project, operation, arguments);
+                Types.setTransaction(transaction);
+                try {
+                    return applyTransactionalOperation(transaction, project, operation, arguments);
+                } finally {
+                    Types.setTransaction(null);
+                }
             }
         };
 
@@ -340,7 +349,8 @@ public final class EditMetadataTool implements McpTool {
                     "description":"Список транзакційних операцій (setProperty/setSynonym/addAttribute/addTabularSection/create-deleteObject тощо) ОДНІЄЮ атомарною транзакцією: помилка кроку відкочує все. renameObject/adoptObject/форм-операції в batch не допускаються.",
                     "example":{"operation":"batch","dryRun":true,"operations":[{"operation":"createObject","kind":"Справочник","name":"МійДовідник"},{"operation":"addAttribute","kind":"Справочник","name":"МійДовідник","attribute":"Код1С","types":["Строка"],"length":10}]}}
                 },
-                "notes":["Нові операції (addDimension/addResource/addItem/deleteItem/setItemProperty/setItemType, склад підсистем і планів обміну, setRoleRights) — транзакційні: працюють у batch з createObject/addAttribute.",
+                "notes":["Сумісність із контрактом RSV: addRegisterField/removeRegisterField (fieldKind=dimension|resource|attribute, field), addEnumValue (value), setValueType (item, types — колекція шукається сама), setDefinedTypeTypes (types), setRoleRight (role, object, right, grant); повторне додавання поля повертає alreadyExists:true замість помилки; createObject приймає масиви dimensions/resources/attributes; setRoleRights приймає вкладені цілі Вид.Ім'я.Attribute.X / .TabularSection.X[.Attribute.Y] / .Command.X / .Dimension.X / .Resource.X; addExchangePlanContent приймає items:[{object,autoRecord}].",
+                  "Нові операції (addDimension/addResource/addItem/deleteItem/setItemProperty/setItemType, склад підсистем і планів обміну, setRoleRights) — транзакційні: працюють у batch з createObject/addAttribute.",
                   "dryRun виконує транзакцію і відкочує її (executeAndRollback) — безпечна перевірка параметрів.",
                   "Створення top-об'єктів (довідників, документів) — у наступних версіях."]}""").getAsJsonObject(); //$NON-NLS-1$
     }
@@ -424,11 +434,15 @@ public final class EditMetadataTool implements McpTool {
 
     /** Одна транзакційна операція над метаданими всередині відкритої BM-транзакції. */
     private static JsonObject applyTransactionalOperation(IBmTransaction transaction, IProject project,
-            String operation, JsonObject arguments) {
+            String operation, JsonObject originalArguments) {
+        JsonObject arguments = normalizeAliases(operation, originalArguments);
+        operation = canonicalOperation(operation, arguments);
         String kind = required(arguments, "kind"); //$NON-NLS-1$
         String name = required(arguments, "name"); //$NON-NLS-1$
         if ("createObject".equals(operation)) { //$NON-NLS-1$
-            return createTopObject(transaction, KindRegistry.canonical(kind), name, arguments);
+            JsonObject created = createTopObject(transaction, KindRegistry.canonical(kind), name, arguments);
+            addInlineFields(transaction, project, KindRegistry.canonical(kind), name, arguments, created);
+            return created;
         }
         if ("deleteObject".equals(operation)) { //$NON-NLS-1$
             return deleteTopObject(transaction, KindRegistry.canonical(kind), name);
@@ -464,8 +478,9 @@ public final class EditMetadataTool implements McpTool {
         case "setItemProperty" -> setProperty(findChild(attributesOwner(object, arguments), //$NON-NLS-1$
                 required(arguments, "collection"), required(arguments, "item")), //$NON-NLS-1$ //$NON-NLS-2$
                 required(arguments, "property"), textValue(arguments)); //$NON-NLS-1$
-        case "setItemType" -> setItemType(project, findChild(attributesOwner(object, arguments), //$NON-NLS-1$
+        case "setItemType" -> setItemType(project, findItemAnywhere(attributesOwner(object, arguments), //$NON-NLS-1$
                 required(arguments, "collection"), required(arguments, "item")), arguments); //$NON-NLS-1$ //$NON-NLS-2$
+        case "setDefinedTypeTypes" -> setItemType(project, object, arguments); //$NON-NLS-1$
         case "addSubsystemContent", "removeSubsystemContent" -> StructureOps.subsystemContent( //$NON-NLS-1$ //$NON-NLS-2$
                 transaction, object, arguments, "addSubsystemContent".equals(operation)); //$NON-NLS-1$
         case "addExchangePlanContent", "removeExchangePlanContent" -> StructureOps.exchangePlanContent( //$NON-NLS-1$ //$NON-NLS-2$
@@ -474,6 +489,76 @@ public final class EditMetadataTool implements McpTool {
         default -> throw new IllegalArgumentException("Операція недоступна (чи не підтримується в batch): " //$NON-NLS-1$
                 + operation + ". Викличте operation=help."); //$NON-NLS-1$
         };
+    }
+
+    /** Імена операцій у контракті RSV → наші базові операції. */
+    private static String canonicalOperation(String operation, JsonObject arguments) {
+        return switch (operation) {
+        case "addRegisterField" -> "addItem"; //$NON-NLS-1$ //$NON-NLS-2$
+        case "removeRegisterField" -> "deleteItem"; //$NON-NLS-1$ //$NON-NLS-2$
+        case "addEnumValue" -> "addItem"; //$NON-NLS-1$ //$NON-NLS-2$
+        case "setValueType" -> "setItemType"; //$NON-NLS-1$ //$NON-NLS-2$
+        case "setRoleRight" -> "setRoleRights"; //$NON-NLS-1$ //$NON-NLS-2$
+        default -> operation;
+        };
+    }
+
+    /**
+     * Сумісність із контрактом RSV: addRegisterField/removeRegisterField (fieldKind + field),
+     * addEnumValue (value), setValueType (колекція визначається за іменем), setRoleRight
+     * (role + object + right), setDefinedTypeTypes. Повертає копію аргументів із нашими іменами.
+     */
+    private static JsonObject normalizeAliases(String operation, JsonObject source) {
+        JsonObject args = source.deepCopy();
+        switch (operation) {
+        case "addRegisterField", "removeRegisterField" -> { //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "item", "field"); //$NON-NLS-1$ //$NON-NLS-2$
+            String fieldKind = args.has("fieldKind") ? args.get("fieldKind").getAsString() : "attribute"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+            String collection = switch (fieldKind.toLowerCase(java.util.Locale.ROOT).replace(" ", "")) { //$NON-NLS-1$ //$NON-NLS-2$
+            case "dimension", "dimensions", "измерение", "вимір" -> "dimensions"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+            case "resource", "resources", "ресурс" -> "resources"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+            case "attribute", "attributes", "реквизит", "реквізит" -> "attributes"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$
+            default -> throw new IllegalArgumentException("fieldKind: dimension | resource | attribute, отримано " //$NON-NLS-1$
+                    + fieldKind);
+            };
+            args.addProperty("collection", collection); //$NON-NLS-1$
+        }
+        case "addEnumValue" -> { //$NON-NLS-1$
+            copyIfAbsent(args, "item", "value"); //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "item", "enumValue"); //$NON-NLS-1$ //$NON-NLS-2$
+            args.addProperty("collection", "enumValues"); //$NON-NLS-1$ //$NON-NLS-2$
+            args.remove("types"); //$NON-NLS-1$
+        }
+        case "setValueType" -> { //$NON-NLS-1$
+            copyIfAbsent(args, "item", "field"); //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "item", "attribute"); //$NON-NLS-1$ //$NON-NLS-2$
+            if (!args.has("collection")) { //$NON-NLS-1$
+                args.addProperty("collection", "*"); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+        }
+        case "setRoleRight" -> { //$NON-NLS-1$
+            if (!args.has("kind")) { //$NON-NLS-1$
+                args.addProperty("kind", "Role"); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+            copyIfAbsent(args, "name", "role"); //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "objects", "object"); //$NON-NLS-1$ //$NON-NLS-2$
+            copyIfAbsent(args, "rights", "right"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        case "addExchangePlanContent", "removeExchangePlanContent" -> copyIfAbsent(args, "objects", "content"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        case "addSubsystemContent", "removeSubsystemContent" -> copyIfAbsent(args, "objects", "content"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        case "setDefinedTypeTypes" -> { //$NON-NLS-1$
+            copyIfAbsent(args, "types", "typeNames"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        default -> {
+        }
+        }
+        return args;
+    }
+
+    private static void copyIfAbsent(JsonObject args, String target, String source) {
+        if (!args.has(target) && args.has(source)) {
+            args.add(target, args.get(source));
+        }
     }
 
     /**
@@ -494,6 +579,8 @@ public final class EditMetadataTool implements McpTool {
             public JsonObject execute(IBmTransaction transaction, IProgressMonitor monitor) {
                 com.google.gson.JsonArray steps = new com.google.gson.JsonArray();
                 int index = 0;
+                Types.setTransaction(transaction);
+                try {
                 for (com.google.gson.JsonElement element : operations) {
                     index++;
                     if (!element.isJsonObject()) {
@@ -515,6 +602,9 @@ public final class EditMetadataTool implements McpTool {
                         throw new IllegalArgumentException("batch: крок " + index + " (" + stepOperation //$NON-NLS-1$ //$NON-NLS-2$
                                 + ") провалився, всю транзакцію відкочено: " + e.getMessage(), e); //$NON-NLS-1$
                     }
+                }
+                } finally {
+                    Types.setTransaction(null);
                 }
                 JsonObject batchResult = new JsonObject();
                 batchResult.add("steps", steps); //$NON-NLS-1$
@@ -595,6 +685,43 @@ public final class EditMetadataTool implements McpTool {
         return change;
     }
 
+    /** createObject: масиви dimensions / resources / attributes створюють поля одразу з об'єктом. */
+    private static void addInlineFields(IBmTransaction transaction, IProject project, String canonicalKind,
+            String name, JsonObject arguments, JsonObject change) {
+        EObject owner = null;
+        com.google.gson.JsonArray added = new com.google.gson.JsonArray();
+        for (String collection : new String[] {"dimensions", "resources", "attributes"}) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+            if (!arguments.has(collection) || !arguments.get(collection).isJsonArray()) {
+                continue;
+            }
+            if (owner == null) {
+                owner = transaction.getTopObjectByFqn(canonicalKind + "." + name); //$NON-NLS-1$
+            }
+            for (JsonElement element : arguments.getAsJsonArray(collection)) {
+                JsonObject field = element.getAsJsonObject().deepCopy();
+                String fieldName = field.has("name") ? field.get("name").getAsString() : required(field, "item"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                if (!field.has("types") && field.has("type")) { //$NON-NLS-1$ //$NON-NLS-2$
+                    com.google.gson.JsonArray single = new com.google.gson.JsonArray();
+                    single.add(field.get("type").getAsString()); //$NON-NLS-1$
+                    field.add("types", single); //$NON-NLS-1$
+                }
+                if (!field.has("types")) { //$NON-NLS-1$
+                    com.google.gson.JsonArray single = new com.google.gson.JsonArray();
+                    single.add("Строка"); //$NON-NLS-1$
+                    field.add("types", single); //$NON-NLS-1$
+                    if (!field.has("length")) { //$NON-NLS-1$
+                        field.addProperty("length", 10); //$NON-NLS-1$
+                    }
+                }
+                addChild(project, owner, collection, fieldName, field, true);
+                added.add(collection + ":" + fieldName); //$NON-NLS-1$
+            }
+        }
+        if (added.size() > 0) {
+            change.add("fields", added); //$NON-NLS-1$
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static JsonObject deleteTopObject(IBmTransaction transaction, String canonicalKind, String name) {
         String fqn = canonicalKind + "." + name; //$NON-NLS-1$
@@ -641,13 +768,24 @@ public final class EditMetadataTool implements McpTool {
             String childName, JsonObject arguments, boolean withType) {
         EStructuralFeature feature = owner.eClass().getEStructuralFeature(refName);
         if (!(feature instanceof EReference reference) || !reference.isContainment() || !reference.isMany()) {
+            StringBuilder available = new StringBuilder();
+            for (EReference candidate : owner.eClass().getEAllContainments()) {
+                if (candidate.isMany()) {
+                    available.append(available.length() == 0 ? "" : ", ").append(candidate.getName()); //$NON-NLS-1$ //$NON-NLS-2$
+                }
+            }
             throw new IllegalArgumentException("Колекція " + refName + " недоступна для " //$NON-NLS-1$ //$NON-NLS-2$
-                    + owner.eClass().getName());
+                    + owner.eClass().getName() + ". Доступні: " + available); //$NON-NLS-1$
         }
         List<EObject> collection = (List<EObject>) owner.eGet(reference);
         for (EObject existing : collection) {
             if (childName.equalsIgnoreCase(Emf.name(existing))) {
-                throw new IllegalArgumentException("Елемент уже існує: " + childName); //$NON-NLS-1$
+                JsonObject duplicate = new JsonObject();
+                duplicate.addProperty("alreadyExists", true); //$NON-NLS-1$
+                duplicate.addProperty("added", childName); //$NON-NLS-1$
+                duplicate.addProperty("collection", refName); //$NON-NLS-1$
+                duplicate.addProperty("owner", Emf.name(owner)); //$NON-NLS-1$
+                return duplicate;
             }
         }
         EObject child = EcoreUtil.create(reference.getEReferenceType());
@@ -703,6 +841,24 @@ public final class EditMetadataTool implements McpTool {
             change.add("properties", appliedProperties); //$NON-NLS-1$
         }
         return change;
+    }
+
+    /** collection="*" — шукає елемент за іменем в attributes, dimensions, resources. */
+    private static EObject findItemAnywhere(EObject owner, String collection, String itemName) {
+        if (!"*".equals(collection)) { //$NON-NLS-1$
+            return findChild(owner, collection, itemName);
+        }
+        for (String candidate : new String[] {"attributes", "dimensions", "resources"}) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+            if (owner.eClass().getEStructuralFeature(candidate) != null) {
+                try {
+                    return findChild(owner, candidate, itemName);
+                } catch (IllegalArgumentException notHere) {
+                    // шукаємо в наступній колекції
+                }
+            }
+        }
+        throw new IllegalArgumentException("Елемент не знайдено: " + itemName //$NON-NLS-1$
+                + " (шукали в attributes, dimensions, resources)"); //$NON-NLS-1$
     }
 
     /** Знаходить елемент containment-колекції за іменем; помилка перелічує доступні колекції. */

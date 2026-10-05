@@ -28,7 +28,7 @@ import com.polischuk.edt.prl.tools.ToolRegistry;
 public final class McpProtocolHandler {
 
     public static final String SERVER_NAME = "mcp-prl-server"; //$NON-NLS-1$
-    public static final String SERVER_VERSION = "0.21.0"; //$NON-NLS-1$
+    public static final String SERVER_VERSION = "0.21.2"; //$NON-NLS-1$
 
     private static final String LATEST_PROTOCOL = "2025-06-18"; //$NON-NLS-1$
     private static final Set<String> SUPPORTED_PROTOCOLS = Set.of(

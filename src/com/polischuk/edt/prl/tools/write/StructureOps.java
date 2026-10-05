@@ -57,11 +57,40 @@ final class StructureOps {
                     + reference);
         }
         String kind = KindRegistry.canonical(reference.substring(0, dot));
-        EObject object = resolveObject(transaction, kind, reference.substring(dot + 1));
+        String rest = reference.substring(dot + 1);
+        if (!"Subsystem".equals(kind) && rest.indexOf('.') > 0) { //$NON-NLS-1$
+            // вкладений елемент: Вид.Ім'я.Attribute.Ім'я / .TabularSection.Ім'я[.Attribute.Ім'я] / .Command.Ім'я
+            String[] parts = rest.split("\\."); //$NON-NLS-1$
+            if (parts.length % 2 == 0) {
+                throw new IllegalArgumentException("Шлях " + reference //$NON-NLS-1$
+                        + " має вигляд Вид.Ім'я[.Attribute|TabularSection|Command|Dimension|Resource.Ім'я]..."); //$NON-NLS-1$
+            }
+            EObject current = resolveObject(transaction, kind, parts[0]);
+            if (current == null) {
+                throw new IllegalArgumentException("Об'єкт не знайдено: " + kind + "." + parts[0]); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+            for (int i = 1; i < parts.length; i += 2) {
+                current = EditMetadataTool.findChild(current, childCollection(parts[i]), parts[i + 1]);
+            }
+            return current;
+        }
+        EObject object = resolveObject(transaction, kind, rest);
         if (object == null) {
-            throw new IllegalArgumentException("Об'єкт не знайдено: " + kind + "." + reference.substring(dot + 1)); //$NON-NLS-1$ //$NON-NLS-2$
+            throw new IllegalArgumentException("Об'єкт не знайдено: " + kind + "." + rest); //$NON-NLS-1$ //$NON-NLS-2$
         }
         return object;
+    }
+
+    private static String childCollection(String token) {
+        return switch (token.toLowerCase(java.util.Locale.ROOT)) {
+        case "attribute", "реквизит", "реквізит" -> "attributes"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+        case "tabularsection", "табличнаячасть", "табличначастина" -> "tabularSections"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+        case "command", "команда" -> "commands"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        case "dimension", "измерение", "вимір" -> "dimensions"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+        case "resource", "ресурс" -> "resources"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+        default -> throw new IllegalArgumentException("Невідомий елемент шляху: " + token //$NON-NLS-1$
+                + " (Attribute | TabularSection | Command | Dimension | Resource)"); //$NON-NLS-1$
+        };
     }
 
     /** Масив рядків параметра (objects) або одиночне значення параметра singleName. */
@@ -149,7 +178,23 @@ final class StructureOps {
                 ? arguments.get("autoRecord").getAsString() : null; //$NON-NLS-1$
         JsonArray changed = new JsonArray();
         JsonArray skipped = new JsonArray();
-        for (String reference : stringList(arguments, "objects", "object")) { //$NON-NLS-1$ //$NON-NLS-2$
+        java.util.LinkedHashMap<String, String> requested = new java.util.LinkedHashMap<>();
+        if (arguments.has("items") && arguments.get("items").isJsonArray()) { //$NON-NLS-1$ //$NON-NLS-2$
+            for (com.google.gson.JsonElement element : arguments.getAsJsonArray("items")) { //$NON-NLS-1$
+                JsonObject entry = element.getAsJsonObject();
+                String objectName = entry.has("object") ? entry.get("object").getAsString() //$NON-NLS-1$ //$NON-NLS-2$
+                        : entry.get("content").getAsString(); //$NON-NLS-1$
+                requested.put(objectName, entry.has("autoRecord") ? entry.get("autoRecord").getAsString() : autoRecord); //$NON-NLS-1$ //$NON-NLS-2$
+            }
+        }
+        if (arguments.has("objects") || arguments.has("object") || requested.isEmpty()) { //$NON-NLS-1$ //$NON-NLS-2$
+            for (String reference : stringList(arguments, "objects", "object")) { //$NON-NLS-1$ //$NON-NLS-2$
+                requested.putIfAbsent(reference, autoRecord);
+            }
+        }
+        for (java.util.Map.Entry<String, String> request : requested.entrySet()) {
+            String reference = request.getKey();
+            String itemAutoRecord = request.getValue();
             EObject target = resolveReference(transaction, reference);
             EObject existing = null;
             for (EObject item : content) {
@@ -160,8 +205,8 @@ final class StructureOps {
             }
             if (add) {
                 if (existing != null) {
-                    if (autoRecord != null) { // вже у складі — лише оновлюємо autoRecord
-                        setAutoRecord(existing, autoRecord);
+                    if (itemAutoRecord != null) { // вже у складі — лише оновлюємо autoRecord
+                        setAutoRecord(existing, itemAutoRecord);
                         changed.add(reference);
                     } else {
                         skipped.add(reference);
@@ -174,8 +219,8 @@ final class StructureOps {
                     throw new IllegalStateException("Елемент складу плану обміну не має mdObject"); //$NON-NLS-1$
                 }
                 item.eSet(mdObject, target);
-                if (autoRecord != null) {
-                    setAutoRecord(item, autoRecord);
+                if (itemAutoRecord != null) {
+                    setAutoRecord(item, itemAutoRecord);
                 }
                 content.add(item);
                 changed.add(reference);

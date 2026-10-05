@@ -14,7 +14,9 @@ import java.util.Locale;
 import java.util.Map;
 
 import org.eclipse.core.resources.IProject;
+import org.eclipse.emf.ecore.EObject;
 
+import com._1c.g5.v8.bm.core.IBmTransaction;
 import com._1c.g5.v8.dt.mcore.DateFractions;
 import com._1c.g5.v8.dt.mcore.DateQualifiers;
 import com._1c.g5.v8.dt.mcore.McoreFactory;
@@ -37,7 +39,54 @@ public final class Types {
     private static final Map<String, String> SIMPLE = new HashMap<>();
     private static final Map<String, String> REF_PREFIX = new HashMap<>();
 
+    /** Метадані, на які посилаються ссылочные типи, беремо з транзакції, у якій виконується операція. */
+    private static final ThreadLocal<IBmTransaction> CURRENT_TRANSACTION = new ThreadLocal<>();
+
+    private static final Map<String, String> REF_KIND = new HashMap<>();
+
+    static {
+        REF_KIND.put("CatalogRef", "Catalog"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("DocumentRef", "Document"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("EnumRef", "Enum"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("ChartOfCharacteristicTypesRef", "ChartOfCharacteristicTypes"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("ChartOfAccountsRef", "ChartOfAccounts"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("ChartOfCalculationTypesRef", "ChartOfCalculationTypes"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("ExchangePlanRef", "ExchangePlan"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("BusinessProcessRef", "BusinessProcess"); //$NON-NLS-1$ //$NON-NLS-2$
+        REF_KIND.put("TaskRef", "Task"); //$NON-NLS-1$ //$NON-NLS-2$
+    }
+
     private Types() {
+    }
+
+    /** Задає транзакцію для резолву ссылочных типів (скидається викликом з null). */
+    public static void setTransaction(IBmTransaction transaction) {
+        if (transaction == null) {
+            CURRENT_TRANSACTION.remove();
+        } else {
+            CURRENT_TRANSACTION.set(transaction);
+        }
+    }
+
+    /** "CatalogRef.X" → TypeItem зі згенерованих типів (producedTypes.refType) метаданих X. */
+    private static TypeItem producedRefType(String platformName) {
+        IBmTransaction transaction = CURRENT_TRANSACTION.get();
+        int dot = platformName.indexOf('.');
+        if (transaction == null || dot <= 0) {
+            return null;
+        }
+        String kind = REF_KIND.get(platformName.substring(0, dot));
+        if (kind == null) {
+            return null;
+        }
+        EObject owner = transaction.getTopObjectByFqn(kind + "." + platformName.substring(dot + 1)); //$NON-NLS-1$
+        if (owner == null) {
+            throw new IllegalArgumentException("Тип " + platformName + ": об'єкт " + kind + "." //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+                    + platformName.substring(dot + 1) + " не знайдено у конфігурації"); //$NON-NLS-1$
+        }
+        Object produced = Emf.get(owner, "producedTypes"); //$NON-NLS-1$
+        Object refType = produced instanceof EObject types ? Emf.get(types, "refType") : null; //$NON-NLS-1$
+        return refType instanceof TypeItem item ? item : null;
     }
 
     static {
@@ -117,7 +166,10 @@ public final class Types {
         TypeDescription description = McoreFactory.eINSTANCE.createTypeDescription();
         for (String rawName : typeNames) {
             String platformName = toPlatformTypeName(rawName);
-            TypeItem item = provider.getProxy(platformName);
+            TypeItem item = producedRefType(platformName);
+            if (item == null) {
+                item = provider.getProxy(platformName);
+            }
             if (item == null) {
                 throw new IllegalArgumentException("Тип не знайдено: " + rawName //$NON-NLS-1$
                         + " (платформене ім'я: " + platformName + ")"); //$NON-NLS-1$ //$NON-NLS-2$
