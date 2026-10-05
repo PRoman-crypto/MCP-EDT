@@ -448,6 +448,10 @@ public final class EditMetadataTool implements McpTool {
         if ("createObject".equals(operation)) { //$NON-NLS-1$
             JsonObject created = createTopObject(transaction, KindRegistry.canonical(kind), name, arguments);
             addInlineFields(transaction, project, KindRegistry.canonical(kind), name, arguments, created);
+            if ("Role".equals(KindRegistry.canonical(kind)) //$NON-NLS-1$
+                    && transaction.getTopObjectByFqn("Role." + name) instanceof com._1c.g5.v8.dt.metadata.mdclass.Role newRole) { //$NON-NLS-1$
+                RoleRightsOps.ensureDescription(transaction, newRole);
+            }
             return created;
         }
         if ("deleteObject".equals(operation)) { //$NON-NLS-1$

@@ -48,10 +48,7 @@ final class RoleRightsOps {
             throw new IllegalArgumentException("Операція призначена для kind=Role, а не " //$NON-NLS-1$
                     + roleObject.eClass().getName());
         }
-        if (!(role.getRights() instanceof RoleDescription description)) {
-            throw new IllegalStateException("Роль " + role.getName() //$NON-NLS-1$
-                    + " не має опису прав (Rights). Відкрийте роль у EDT і збережіть, чи створіть її заново."); //$NON-NLS-1$
-        }
+        RoleDescription description = ensureDescription(transaction, role);
         JsonObject change = new JsonObject();
         change.addProperty("role", role.getName()); //$NON-NLS-1$
 
@@ -112,6 +109,25 @@ final class RoleRightsOps {
         }
         change.add("objects", results); //$NON-NLS-1$
         return change;
+    }
+
+    /**
+     * Опис прав (Rights.rights) нової ролі в EDT створюється при першому відкритті редактора;
+     * тут створюємо його одразу як окремий top-об'єкт Role.Name.Rights.
+     */
+    static RoleDescription ensureDescription(IBmTransaction transaction, Role role) {
+        if (role.getRights() instanceof RoleDescription existing) {
+            return existing;
+        }
+        if (role.getRights() != null) {
+            throw new IllegalStateException("Опис прав ролі " + role.getName() + " має невідомий тип"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        RoleDescription description = com._1c.g5.v8.dt.rights.model.RightsFactory.eINSTANCE.createRoleDescription();
+        if (description instanceof com._1c.g5.v8.bm.core.IBmObject bmDescription) {
+            transaction.attachTopObject(bmDescription, "Role." + role.getName() + ".Rights"); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        role.setRights(description);
+        return description;
     }
 
     private static Right findRight(Set<Right> available, String name) {
