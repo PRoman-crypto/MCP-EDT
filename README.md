@@ -67,7 +67,11 @@ claude mcp add --transport http 1c-rsv http://127.0.0.1:8765/mcp
 | Експорт | `export_object` (.epf/.erf; потребує проєкт зовнішньої обробки і пов'язану ІБ) |
 | CI/тести* | `run_vrunner` (Vanessa Runner асинхронно, allowlist команд), `get_job_status` (статус/вивід/stop джоб) |
 
-`edit_metadata` (v0.8.0): properties, синоніми, реквізити з типами (у т.ч. в ТЧ), табличні
+`edit_metadata` (v0.21.0): виміри й ресурси регістрів (`addDimension`/`addResource`, ссылочные типи,
+кваліфікатори дати/числа), загальні `addItem`/`deleteItem`/`setItemProperty`/`setItemType` для будь-якої
+колекції, склад підсистем (`addSubsystemContent`/`removeSubsystemContent`) і планів обміну
+(`addExchangePlanContent`/`removeExchangePlanContent`), права ролей (`setRoleRights`); усе транзакційне,
+з `dryRun` і в `batch`. Раніше (v0.8.0): properties, синоніми, реквізити з типами (у т.ч. в ТЧ), табличні
 частини, створення і видалення top-об'єктів (`createObject`/`deleteObject`); усі операції
 з `dryRun` через відкат BM-транзакції. Настройки: Window → Preferences → MCP:PRL (статус,
 дозвіл запису); індикатор порту в статус-барі; discovery-файл `%USERPROFILE%\.edt-mcp\instance-*.json`.

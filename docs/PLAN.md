@@ -245,3 +245,13 @@
 - [x] 22.2. Проєкт `PRL_ExportTest` створено в `%USERPROFILE%\EDT\external\` — свідомо поза `%USERPROFILE%\git\ka-amadeo-4edt`, щоб не додавати сміття в репозиторій користувача.
 - [x] 22.3. Новий інструмент `import_project` — підключення наявного каталогу до workspace (аналог File → Import → Existing Projects). Без нього створений ззовні проєкт EDT просто не бачить: Eclipse не сканує диск. За WriteGate (змінює склад workspace).
 - [x] 22.4. Живий прогін (0.20.0) — ЛАНЦЮГ ЗАМКНУТО: `import_project` підключив каталог (natures правильні, `v8ProjectType: ExternalObjectProject`); `get_validation_errors` по новому проєкту — **0 помилок**, тобто зібраний вручну `.mdo` EDT прийняла; `export_object` зібрав **PRL_ТестExport.epf, 4562 Б, сигнатура `FF FF FF 7F`** (бінарний контейнер 1С). Пункт 4.7 із Milestone 4, що висів із 2026-08-25, закрито.
+
+
+## Milestone 23 — структурні метадані в edit_metadata (v0.21.0)
+Закриває прогалини «блоку 1»: виміри/ресурси регістрів, ссылочные типи, права ролей, склад підсистем і планів обміну.
+- [x] 23.1. `addDimension`/`addResource` + загальні `addItem`/`deleteItem`/`setItemProperty`/`setItemType` (будь-яка containment-колекція; помилка перелічує доступні); `properties` при створенні елемента; enum-властивості приймають ім'я чи літерал без урахування регістру.
+- [x] 23.2. Типи: `ЛюбаяСсылка`/`AnyRef`, `СправочникСсылка` без імені (усі довідники) та ін.; кваліфікатори `dateFractions`, `nonNegative`.
+- [x] 23.3. Склад підсистем (`add/removeSubsystemContent`, вкладені — через крапку) і планів обміну (`add/removeExchangePlanContent`, `autoRecord`).
+- [x] 23.4. `setRoleRights` — права ролі через `RightsModelUtil`/`IRightInfosService` у BM-транзакції (RLS не чіпає); нові Import-Package `dt.rights*`.
+- [x] 23.5. Усе транзакційне: працює в `batch` і з `dryRun`. Збірка 0.21.0 компілюється.
+- [ ] 23.6. ЖИВИЙ ПРОГІН: деплой у EDT (потрібен UAC) і dryRun/реальні виклики кожної нової операції; перевірити `Role.rights` у новоствореної ролі, `changeObjectRight` (порядок аргументів value/default), отримання `IRightInfosService`.
