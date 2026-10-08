@@ -17,6 +17,7 @@ import org.eclipse.core.runtime.NullProgressMonitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.polischuk.edt.prl.edt.EdtExecution;
 import com.polischuk.edt.prl.edt.EdtServices;
 import com.polischuk.edt.prl.edt.V8Access;
 import com.polischuk.edt.prl.edt.WriteGate;
@@ -60,7 +61,7 @@ public final class RunApplicationTool implements McpTool {
         IApplication application = resolveApplication(manager, project,
                 arguments.has("application") ? arguments.get("application").getAsString() : null); //$NON-NLS-1$ //$NON-NLS-2$
 
-        ExecutionContext context = new ExecutionContext();
+        ExecutionContext context = EdtExecution.context(false);
         // без типу клієнта IApplicationManager.start падає:
         // «Контекст выполнения не предоставляет тип клиента для запуска»
         context.setProperty(IApplication.CONTEXT_CLIENT_TYPE, YaxunitTestsTool.clientTypeId(arguments));

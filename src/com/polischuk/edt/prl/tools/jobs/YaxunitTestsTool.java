@@ -36,6 +36,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.polischuk.edt.prl.edt.EdtExecution;
 import com.polischuk.edt.prl.edt.EdtServices;
 import com.polischuk.edt.prl.edt.V8Access;
 import com.polischuk.edt.prl.edt.WriteGate;
@@ -58,6 +59,9 @@ import com.polischuk.edt.prl.tools.McpTool;
 public final class YaxunitTestsTool implements McpTool {
 
     private static final int DEFAULT_TIMEOUT_SECONDS = 300;
+    /** Скільки тримати HTTP-виклик: клієнти MCP обривають запит приблизно за 60 с. */
+    private static final int DEFAULT_WAIT_SECONDS = 45;
+    private static final int MAX_WAIT_SECONDS = 55;
     private static final long POLL_INTERVAL_MS = 1000;
     private static final int MAX_FAILURES = 50;
     private static final int MAX_MESSAGE_CHARS = 2000;
@@ -72,7 +76,10 @@ public final class YaxunitTestsTool implements McpTool {
         return "Прогін юніт-тестів YAxUnit: стартує 1С:Підприємство з параметром RunUnitTests, " //$NON-NLS-1$
                 + "чекає звіт і повертає підсумок (пройдено/впало/пропущено, стектрейси). " //$NON-NLS-1$
                 + "Фільтри через кому: extensions, modules, tests (Модуль.Метод), suites, tags, contexts. " //$NON-NLS-1$
-                + "wait=false — не чекати, повернути jobId і шлях до звіту. " //$NON-NLS-1$
+                + "Оновлення ІБ, запуск і очікування звіту йдуть у фоновій джобі; виклик чекає не довше " //$NON-NLS-1$
+                + "waitSeconds (45 с типово — клієнти MCP обривають запит ~за 60 с). Якщо прогін не вклався, " //$NON-NLS-1$
+                + "відповідь має pending=true і jobId: підсумок — get_job_status (поле result). " //$NON-NLS-1$
+                + "wait=false — не чекати зовсім. " //$NON-NLS-1$
                 + "Потрібне розширення YAxUnit у базі та підключена до проєкту ІБ (list_applications)."; //$NON-NLS-1$
     }
 
@@ -92,8 +99,9 @@ public final class YaxunitTestsTool implements McpTool {
                   "logLevel":{"type":"string","enum":["info","debug","trace"],"default":"debug"},
                   "clientType":{"type":"string","enum":["thin","thick"],"default":"thin","description":"Тип клієнта 1С для прогону"},
                   "updateBeforeLaunch":{"type":"boolean","default":true,"description":"Оновити конфігурацію ІБ перед прогоном"},
-                  "wait":{"type":"boolean","default":true,"description":"Чекати завершення й повернути підсумок; false — одразу jobId"},
-                  "timeoutSeconds":{"type":"integer","default":300}
+                  "wait":{"type":"boolean","default":true,"description":"Чекати завершення (до waitSeconds) і повернути підсумок; false — одразу jobId"},
+                  "waitSeconds":{"type":"integer","default":45,"description":"Скільки секунд тримати виклик (1-55); прогін, що не вклався, продовжується у фоні — підсумок через get_job_status"},
+                  "timeoutSeconds":{"type":"integer","default":300,"description":"Ліміт очікування звіту у фоні після старту 1С"}
                 }}""").getAsJsonObject(); //$NON-NLS-1$
     }
 
@@ -105,6 +113,9 @@ public final class YaxunitTestsTool implements McpTool {
         boolean wait = !arguments.has("wait") || arguments.get("wait").getAsBoolean(); //$NON-NLS-1$ //$NON-NLS-2$
         int timeoutSeconds = arguments.has("timeoutSeconds") //$NON-NLS-1$
                 ? Math.max(10, arguments.get("timeoutSeconds").getAsInt()) : DEFAULT_TIMEOUT_SECONDS; //$NON-NLS-1$
+        int waitSeconds = arguments.has("waitSeconds") //$NON-NLS-1$
+                ? Math.min(MAX_WAIT_SECONDS, Math.max(1, arguments.get("waitSeconds").getAsInt())) //$NON-NLS-1$
+                : DEFAULT_WAIT_SECONDS;
 
         IProject project = V8Access.resolveEclipseProject(projectName);
         IApplicationManager manager = EdtServices.require(IApplicationManager.class);
@@ -115,26 +126,9 @@ public final class YaxunitTestsTool implements McpTool {
         Path reportPath = sessionDir.resolve("report.xml"); //$NON-NLS-1$
         Path logPath = sessionDir.resolve("yaxunit.log"); //$NON-NLS-1$
         Path settingsPath = writeRunSettings(arguments, sessionDir, reportPath, logPath);
-
-        if (!arguments.has("updateBeforeLaunch") || arguments.get("updateBeforeLaunch").getAsBoolean()) { //$NON-NLS-1$ //$NON-NLS-2$
-            // без оновлення 1С при старті покаже модальне вікно про застарілу конфігурацію
-            // і прогін зависне на ньому назавжди
-            manager.update(application, ApplicationUpdateType.INCREMENTAL,
-                    new ExecutionContext(), new NullProgressMonitor());
-        }
-
-        RuntimeExecutionArguments runtimeArguments = new RuntimeExecutionArguments();
-        runtimeArguments.setStartupOption("RunUnitTests=" + settingsPath); //$NON-NLS-1$
-        runtimeArguments.setDisableStartupMessages(true);
-        ExecutionContext context = new ExecutionContext();
-        context.setProperty(IApplication.CONTEXT_CLIENT_TYPE, clientTypeId(arguments));
-        context.setProperty(IApplication.CONTEXT_CLIENT_ARGUMENTS, runtimeArguments);
-
-        Optional<Process> process = manager.start(application, context, new NullProgressMonitor());
-        JsonObject job = process.isPresent()
-                ? JobManager.wrapProcess(process.get(), "yaxunit_tests — " + application.getName(), //$NON-NLS-1$
-                        java.nio.charset.Charset.forName("CP866")) //$NON-NLS-1$
-                : new JsonObject();
+        boolean updateBeforeLaunch = !arguments.has("updateBeforeLaunch") //$NON-NLS-1$
+                || arguments.get("updateBeforeLaunch").getAsBoolean(); //$NON-NLS-1$
+        String clientType = clientTypeId(arguments);
 
         JsonObject result = new JsonObject();
         result.addProperty("project", project.getName()); //$NON-NLS-1$
@@ -142,22 +136,77 @@ public final class YaxunitTestsTool implements McpTool {
         result.addProperty("runSettings", settingsPath.toString()); //$NON-NLS-1$
         result.addProperty("reportPath", reportPath.toString()); //$NON-NLS-1$
         result.addProperty("logPath", logPath.toString()); //$NON-NLS-1$
-        if (job.has("jobId")) { //$NON-NLS-1$
-            result.addProperty("jobId", job.get("jobId").getAsString()); //$NON-NLS-1$ //$NON-NLS-2$
-        }
+
+        // Оновлення ІБ, запуск 1С і очікування звіту йдуть у фоновій джобі: HTTP-виклик MCP
+        // клієнти обривають за ~60 с, а оновлення + прогін легко довші.
+        JsonObject pipelineResult = result.deepCopy(); // належить лише фоновому потоку
+        JsonObject job = JobManager.startResultTask("yaxunit_tests — " + application.getName(), //$NON-NLS-1$
+                log -> runPipeline(log, manager, application, pipelineResult, updateBeforeLaunch,
+                        clientType, settingsPath, reportPath, timeoutSeconds));
+        String jobId = job.get("jobId").getAsString(); //$NON-NLS-1$
+        result.addProperty("jobId", jobId); //$NON-NLS-1$
         if (!wait) {
             result.addProperty("waiting", false); //$NON-NLS-1$
-            result.addProperty("hint", "Прогін запущено. Стан процесу — get_job_status, " //$NON-NLS-1$ //$NON-NLS-2$
-                    + "звіт з'явиться у reportPath; повторіть виклик із wait=true або читайте файл."); //$NON-NLS-1$
+            result.addProperty("hint", "Прогін запущено у фоні. Хід і підсумок (поле result) — " //$NON-NLS-1$ //$NON-NLS-2$
+                    + "get_job_status jobId=" + jobId + "; звіт з'явиться у reportPath."); //$NON-NLS-1$ //$NON-NLS-2$
             return result;
         }
+
+        if (!JobManager.await(jobId, waitSeconds * 1000L)) {
+            result.addProperty("completed", false); //$NON-NLS-1$
+            result.addProperty("pending", true); //$NON-NLS-1$
+            result.addProperty("waitedSeconds", waitSeconds); //$NON-NLS-1$
+            result.addProperty("hint", "Прогін ще триває у фоні (оновлення ІБ або тести). Викликайте " //$NON-NLS-1$ //$NON-NLS-2$
+                    + "get_job_status jobId=" + jobId + " — коли status=finished, підсумок у полі result; " //$NON-NLS-1$ //$NON-NLS-2$
+                    + "ліміт прогону — timeoutSeconds=" + timeoutSeconds + " с."); //$NON-NLS-1$ //$NON-NLS-2$
+            return result;
+        }
+        JsonObject status = JobManager.status(jobId, 30);
+        if (status.has("error")) { //$NON-NLS-1$
+            throw new IllegalStateException(status.get("error").getAsString() + " (jobId " + jobId //$NON-NLS-1$ //$NON-NLS-2$
+                    + ", хід — get_job_status)"); //$NON-NLS-1$
+        }
+        JsonObject finished = status.getAsJsonObject("result"); //$NON-NLS-1$
+        finished.addProperty("jobId", jobId); //$NON-NLS-1$
+        return finished;
+    }
+
+    /** Тіло фонової джоби: оновлення ІБ → старт 1С із RunUnitTests → очікування й розбір звіту. */
+    private static JsonElement runPipeline(java.util.function.Consumer<String> log, IApplicationManager manager,
+            IApplication application, JsonObject result, boolean updateBeforeLaunch, String clientType,
+            Path settingsPath, Path reportPath, int timeoutSeconds) throws Exception {
+        if (updateBeforeLaunch) {
+            // без оновлення 1С при старті покаже модальне вікно про застарілу конфігурацію
+            // і прогін зависне на ньому назавжди
+            log.accept("Оновлення конфігурації ІБ..."); //$NON-NLS-1$
+            Object state = manager.update(application, ApplicationUpdateType.INCREMENTAL,
+                    EdtExecution.context(), new NullProgressMonitor());
+            log.accept("Оновлення завершено: " + state); //$NON-NLS-1$
+        }
+
+        RuntimeExecutionArguments runtimeArguments = new RuntimeExecutionArguments();
+        runtimeArguments.setStartupOption("RunUnitTests=" + settingsPath); //$NON-NLS-1$
+        runtimeArguments.setDisableStartupMessages(true);
+        ExecutionContext context = EdtExecution.context(false);
+        context.setProperty(IApplication.CONTEXT_CLIENT_TYPE, clientType);
+        context.setProperty(IApplication.CONTEXT_CLIENT_ARGUMENTS, runtimeArguments);
+
+        log.accept("Старт 1С:Підприємства..."); //$NON-NLS-1$
+        Optional<Process> process = manager.start(application, context, new NullProgressMonitor());
+        if (process.isPresent()) {
+            JsonObject processJob = JobManager.wrapProcess(process.get(),
+                    "yaxunit_tests (1С) — " + application.getName(), //$NON-NLS-1$
+                    java.nio.charset.Charset.forName("CP866")); //$NON-NLS-1$
+            result.addProperty("processJobId", processJob.get("jobId").getAsString()); //$NON-NLS-1$ //$NON-NLS-2$
+        }
+        log.accept("1С запущено, чекаю звіт: " + reportPath); //$NON-NLS-1$
 
         if (!awaitReport(reportPath, timeoutSeconds)) {
             result.addProperty("completed", false); //$NON-NLS-1$
             result.addProperty("timeoutSeconds", timeoutSeconds); //$NON-NLS-1$
-            result.addProperty("message", "Звіт не з'явився за " + timeoutSeconds //$NON-NLS-1$
+            result.addProperty("message", "Звіт не з'явився за " + timeoutSeconds //$NON-NLS-1$ //$NON-NLS-2$
                     + " с. 1С могла показати модальне вікно або тести ще йдуть. " //$NON-NLS-1$
-                    + "Подивіться get_job_status і лог у logPath; звіт лишається у reportPath."); //$NON-NLS-1$
+                    + "Подивіться get_job_status (processJobId) і лог у logPath; звіт лишається у reportPath."); //$NON-NLS-1$
             return result;
         }
         result.addProperty("completed", true); //$NON-NLS-1$

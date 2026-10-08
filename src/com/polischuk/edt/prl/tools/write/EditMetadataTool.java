@@ -358,7 +358,7 @@ public final class EditMetadataTool implements McpTool {
                   "setItemType":{"params":"kind, name, collection, item, types [, length, precision, scale, dateFractions, nonNegative, tabularSection, project, dryRun]",
                     "description":"Замінює тип існуючого реквізита/виміру/ресурсу."},
                   "addSubsystemContent":{"params":"kind=Subsystem, name, objects [, project, dryRun]",
-                    "description":"Додає об'єкти до складу підсистеми. name — підсистема (вкладена через крапку: Продажи.Отчеты); objects — ['Справочник.Номенклатура','Document.Заказ'…]. Об'єкти, що вже є у складі, пропускаються.",
+                    "description":"Додає об'єкти до складу підсистеми. name — підсистема (вкладена через крапку або слеш: Продажи.Отчеты, Продажи/Отчеты; FQN Продажи.Subsystem.Отчеты теж приймається; унікальне коротке ім'я вкладеної теж працює); objects — ['Справочник.Номенклатура','Document.Заказ'…]. Об'єкти, що вже є у складі, пропускаються.",
                     "example":{"operation":"addSubsystemContent","kind":"Подсистема","name":"Продажи","objects":["Справочник.Номенклатура","РегистрСведений.МійРегистр"],"dryRun":true}},
                   "removeSubsystemContent":{"params":"kind=Subsystem, name, objects [, project, dryRun]",
                     "description":"Прибирає об'єкти зі складу підсистеми."},

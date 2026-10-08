@@ -35,19 +35,109 @@ final class StructureOps {
     }
 
     /**
-     * Об'єкт за видом та іменем. Для Subsystem ім'я може бути шляхом через крапку
-     * (Продажи.Отчеты) — вкладені підсистеми шукаються у колекції subsystems.
+     * Об'єкт за видом та іменем. Для Subsystem ім'я може бути шляхом через крапку або слеш
+     * (Продажи.Отчеты, Продажи/Отчеты), FQN моделі (Продажи.Subsystem.Отчеты) або унікальним
+     * коротким іменем вкладеної підсистеми.
      */
     static EObject resolveObject(IBmTransaction transaction, String canonicalKind, String name) {
-        if ("Subsystem".equals(canonicalKind) && name.indexOf('.') > 0) { //$NON-NLS-1$
-            String[] segments = name.split("\\."); //$NON-NLS-1$
-            EObject current = transaction.getTopObjectByFqn("Subsystem." + segments[0]); //$NON-NLS-1$
-            for (int i = 1; current != null && i < segments.length; i++) {
-                current = EditMetadataTool.findChild(current, "subsystems", segments[i]); //$NON-NLS-1$
-            }
-            return current;
+        if ("Subsystem".equals(canonicalKind)) { //$NON-NLS-1$
+            return resolveSubsystem(transaction, name);
         }
         return transaction.getTopObjectByFqn(canonicalKind + "." + name); //$NON-NLS-1$
+    }
+
+    /**
+     * Вкладена підсистема в EDT не є containment-елементом батька (у колекції containment
+     * батька лише synonym/explanation), тому шукаємо двома шляхами: у списку {@code subsystems}
+     * батька і як окремий top-об'єкт BM з FQN {@code Subsystem.Батько.Subsystem.Дитина}.
+     */
+    private static EObject resolveSubsystem(IBmTransaction transaction, String path) {
+        List<String> segments = subsystemSegments(path);
+        if (segments.isEmpty()) {
+            return null;
+        }
+        StringBuilder fqn = new StringBuilder("Subsystem.").append(segments.get(0)); //$NON-NLS-1$
+        EObject current = transaction.getTopObjectByFqn(fqn.toString());
+        if (current == null && segments.size() == 1) {
+            return uniqueSubsystemByName(transaction, segments.get(0));
+        }
+        for (int i = 1; current != null && i < segments.size(); i++) {
+            EObject child = namedChild(current, "subsystems", segments.get(i)); //$NON-NLS-1$
+            fqn.append(".Subsystem.").append(child != null ? Emf.name(child) : segments.get(i)); //$NON-NLS-1$
+            current = child != null ? child : transaction.getTopObjectByFqn(fqn.toString());
+        }
+        return current;
+    }
+
+    /** Шлях підсистеми → сегменти імен; роздільники '.' і '/', службові "Subsystem" між іменами відкидаються. */
+    private static List<String> subsystemSegments(String path) {
+        java.util.ArrayList<String> segments = new java.util.ArrayList<>();
+        for (String token : path.split("[./\\\\]")) { //$NON-NLS-1$
+            String clean = token.strip();
+            if (clean.isEmpty()) {
+                continue;
+            }
+            boolean marker = !segments.isEmpty() && "Subsystem".equalsIgnoreCase(clean); //$NON-NLS-1$
+            if (!marker) {
+                segments.add(clean);
+            }
+        }
+        return segments;
+    }
+
+    private static EObject namedChild(EObject owner, String collection, String name) {
+        if (Emf.get(owner, collection) instanceof List<?> items) {
+            for (Object item : items) {
+                if (item instanceof EObject child && name.equalsIgnoreCase(Emf.name(child))) {
+                    return child;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Коротке ім'я вкладеної підсистеми: єдиний збіг у всій конфігурації; кілька збігів — помилка зі шляхами. */
+    private static EObject uniqueSubsystemByName(IBmTransaction transaction, String name) {
+        java.util.LinkedHashSet<EObject> matches = new java.util.LinkedHashSet<>();
+        java.util.Iterator<com._1c.g5.v8.bm.core.IBmObject> tops = transaction.getTopObjectIterator(
+                com._1c.g5.v8.dt.metadata.mdclass.MdClassPackage.Literals.SUBSYSTEM);
+        while (tops.hasNext()) {
+            collectSubsystems(tops.next(), name, matches);
+        }
+        if (matches.size() > 1) {
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            matches.forEach(match -> paths.add(subsystemPath(match)));
+            throw new IllegalArgumentException("Підсистема '" + name + "' неоднозначна, вкажіть повний шлях: " //$NON-NLS-1$ //$NON-NLS-2$
+                    + String.join("; ", paths)); //$NON-NLS-1$
+        }
+        return matches.isEmpty() ? null : matches.iterator().next();
+    }
+
+    private static void collectSubsystems(EObject subsystem, String name, java.util.Set<EObject> matches) {
+        if (name.equalsIgnoreCase(Emf.name(subsystem))) {
+            matches.add(subsystem);
+        }
+        if (Emf.get(subsystem, "subsystems") instanceof List<?> children) { //$NON-NLS-1$
+            for (Object child : children) {
+                if (child instanceof EObject nested) {
+                    collectSubsystems(nested, name, matches);
+                }
+            }
+        }
+    }
+
+    private static String subsystemPath(EObject subsystem) {
+        StringBuilder path = new StringBuilder(String.valueOf(Emf.name(subsystem)));
+        EObject parent = parentSubsystem(subsystem);
+        while (parent != null) {
+            path.insert(0, Emf.name(parent) + "."); //$NON-NLS-1$
+            parent = parentSubsystem(parent);
+        }
+        return path.toString();
+    }
+
+    private static EObject parentSubsystem(EObject subsystem) {
+        return Emf.get(subsystem, "parentSubsystem") instanceof EObject parent ? parent : null; //$NON-NLS-1$
     }
 
     /** "Справочник.Номенклатура" / "Catalog.Номенклатура" → об'єкт моделі. */

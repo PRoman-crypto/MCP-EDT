@@ -51,7 +51,7 @@ public final class GetSubsystemContentTool implements McpTool {
         String path = arguments.get("name").getAsString(); //$NON-NLS-1$
 
         EObject configuration = V8Access.requireConfiguration(projectName);
-        String[] segments = path.split("\\."); //$NON-NLS-1$
+        String[] segments = path.split("[./]"); //$NON-NLS-1$
         EObject subsystem = MetadataIndex.findObject(configuration, "Subsystem", segments[0]); //$NON-NLS-1$
         for (int i = 1; i < segments.length; i++) {
             subsystem = findChild(subsystem, segments[i], path);

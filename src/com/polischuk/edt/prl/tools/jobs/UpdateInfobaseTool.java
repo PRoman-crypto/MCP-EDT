@@ -14,6 +14,7 @@ import org.eclipse.core.runtime.NullProgressMonitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.polischuk.edt.prl.edt.EdtExecution;
 import com.polischuk.edt.prl.edt.EdtServices;
 import com.polischuk.edt.prl.edt.V8Access;
 import com.polischuk.edt.prl.edt.WriteGate;
@@ -36,7 +37,8 @@ public final class UpdateInfobaseTool implements McpTool {
     public String description() {
         return "Оновлює конфігурацію ІБ застосунку з поточного стану проєкту EDT " //$NON-NLS-1$
                 + "(type: incremental — типово, full — повне). Довга операція: повертає jobId, " //$NON-NLS-1$
-                + "результат — get_job_status."; //$NON-NLS-1$
+                + "результат — get_job_status. Потрібне відкрите вікно EDT: якщо в ІБ є зміни чи потрібні " //$NON-NLS-1$
+                + "облікові дані, EDT покаже діалог у своєму вікні, і джоба чекатиме відповіді."; //$NON-NLS-1$
     }
 
     @Override
@@ -62,8 +64,11 @@ public final class UpdateInfobaseTool implements McpTool {
                 && "full".equalsIgnoreCase(arguments.get("type").getAsString()) //$NON-NLS-1$ //$NON-NLS-2$
                         ? ApplicationUpdateType.FULL : ApplicationUpdateType.INCREMENTAL;
 
+        // вікно EDT для діалогів (зміни в ІБ, облікові дані): без нього update падає з
+        // «Shell is not provided in execution context»; беремо його тут, до фонового потоку
+        ExecutionContext context = EdtExecution.context();
         return JobManager.startTask("update_infobase " + application.getName() + " (" + type + ")", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
                 () -> "Результат оновлення: " //$NON-NLS-1$
-                        + manager.update(application, type, new ExecutionContext(), new NullProgressMonitor()));
+                        + manager.update(application, type, context, new NullProgressMonitor()));
     }
 }

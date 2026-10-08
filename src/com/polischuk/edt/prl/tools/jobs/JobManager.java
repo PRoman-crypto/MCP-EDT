@@ -17,8 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 /**
@@ -37,7 +39,14 @@ public final class JobManager {
     private final Process process; // null для внутрішніх задач (worker-потік)
     private final Thread worker;   // null для зовнішніх процесів
     private volatile Integer taskExitCode; // для worker-задач: 0 — успіх, 1 — помилка
+    private volatile JsonElement taskResult; // підсумок worker-задачі з результатом (yaxunit_tests)
+    private volatile String taskError;
     private volatile boolean truncated;
+
+    /** Задача з підсумком у JSON; {@code log} дописує рядки прогресу у вивід джоби. */
+    public interface ResultTask {
+        JsonElement run(Consumer<String> log) throws Exception;
+    }
 
     private JobManager(List<String> command, File workDir, Charset outputCharset) throws IOException {
         this.commandLine = String.join(" ", command); //$NON-NLS-1$
@@ -67,6 +76,24 @@ public final class JobManager {
                 taskExitCode = 0;
             } catch (Throwable e) {
                 appendLine(e.getClass().getSimpleName() + ": " + e.getMessage()); //$NON-NLS-1$
+                taskExitCode = 1;
+            }
+        }, "mcp-prl-task-" + id); //$NON-NLS-1$
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private JobManager(String label, ResultTask task) {
+        this.commandLine = label;
+        this.process = null;
+        this.worker = new Thread(() -> {
+            try {
+                taskResult = task.run(this::appendLine);
+                appendLine("done"); //$NON-NLS-1$
+                taskExitCode = 0;
+            } catch (Throwable e) {
+                taskError = e.getClass().getSimpleName() + ": " + e.getMessage(); //$NON-NLS-1$
+                appendLine(taskError);
                 taskExitCode = 1;
             }
         }, "mcp-prl-task-" + id); //$NON-NLS-1$
@@ -125,6 +152,26 @@ public final class JobManager {
         return register(new JobManager(label, task));
     }
 
+    /**
+     * Довга внутрішня операція з підсумком: результат читається з {@link #status} (поле result),
+     * а викликач може почекати завершення через {@link #await}, не тримаючи HTTP-запит.
+     */
+    public static JsonObject startResultTask(String label, ResultTask task) {
+        return register(new JobManager(label, task));
+    }
+
+    /** Чекає завершення джоби не довше за {@code millis}; true — джоба вже завершена. */
+    public static boolean await(String jobId, long millis) throws InterruptedException {
+        JobManager job = JOBS.get(jobId);
+        if (job == null) {
+            throw new IllegalArgumentException("Джоба не знайдена: " + jobId); //$NON-NLS-1$
+        }
+        if (job.worker != null) {
+            job.worker.join(millis);
+        }
+        return !job.isAlive();
+    }
+
     private static JsonObject register(JobManager job) {
         JOBS.put(job.id, job);
         JsonObject result = new JsonObject();
@@ -150,6 +197,12 @@ public final class JobManager {
             result.addProperty("exitCode", exitCode); //$NON-NLS-1$
         }
         result.addProperty("elapsedSeconds", (System.currentTimeMillis() - job.startedAt) / 1000); //$NON-NLS-1$
+        if (!alive && job.taskResult != null) {
+            result.add("result", job.taskResult); //$NON-NLS-1$
+        }
+        if (!alive && job.taskError != null) {
+            result.addProperty("error", job.taskError); //$NON-NLS-1$
+        }
         String text;
         synchronized (job.output) {
             text = job.output.toString();
